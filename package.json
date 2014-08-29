@@ -1,0 +1,21 @@
+{
+  "name": "ngraph.svg",
+  "version": "0.0.0",
+  "description": "Svg based graph rendering",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "svg",
+    "graph",
+    "vivagraph",
+    "ngraph"
+  ],
+  "author": "Andrei Kashcha",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anvaka/ngraph.svg"
+  }
+}
