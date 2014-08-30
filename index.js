@@ -47,34 +47,18 @@ module.exports = function(graph, settings) {
       //listenToDomEvents(false);
     },
 
-    node: function(builderCallback) {
-      if (typeof builderCallback !== "function") {
-        return;
-      }
+    node: setNodeBuilder,
 
-      // todo: rebuild all nodes.
-      nodeBuilder = builderCallback;
-
-      return this;
-    },
-
-    link: function(template) {
-      if (typeof builderCallback !== "function") {
-        return; // todo: throw? this is not compatible with old versions
-      }
-
-      linkBuilder = builderCallback;
-      return this;
-    },
+    link: setLinkBuilder,
 
     placeNode: function(newPlaceCallback) {
       nodePositionCallback = newPlaceCallback;
-      return this;
+      return api;
     },
 
     placeLink: function(newPlaceLinkCallback) {
       linkPositionCallback = newPlaceLinkCallback;
-      return this;
+      return api;
     },
   };
 
@@ -140,6 +124,14 @@ module.exports = function(graph, settings) {
     //listenToDomEvents(true);
   }
 
+  function setNodeBuilder(builderCallback) {
+    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
+
+    nodeBuilder = builderCallback; // todo: rebuild all nodes?
+
+    return api;
+  }
+
   function addNode(node) {
     var nodeUI = nodeBuilder(node);
     if (!nodeUI) throw new Error('Node builder is supposed to return SVG object');
@@ -195,6 +187,12 @@ module.exports = function(graph, settings) {
     e.preventDefault();
   }
 
+  function setLinkBuilder(builderCallback) {
+    if (typeof builderCallback !== "function") throw new Error('link builder should be a function');
+
+    linkBuilder = builderCallback;
+    return api;
+  }
 
   function addLink(link) {
     var linkUI = linkBuilder(link);
