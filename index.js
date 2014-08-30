@@ -17,7 +17,7 @@ module.exports = function(graph, settings) {
   svgRoot.append(elements);
 
   var nodes = Object.create(null);
-  var edges = Object.create(null);
+  var links = Object.create(null);
 
   var layout = getDefaultLayout();
   var isStable = false;
@@ -31,11 +31,19 @@ module.exports = function(graph, settings) {
   },
     nodePositionCallback = function(nodeUI, pos) {
       nodeUI.attr("x", pos.x - 5).attr("y", pos.y - 5);
-    }, linkBuilder, linkPositionCallback;
-  var cachedPos = {
-    x: 0,
-    y: 0
-  };
+    },
+    linkBuilder = function(linkUI, pos) {
+      return svg("line").attr("stroke", "#999");
+    },
+    linkPositionCallback = function(linkUI, fromPos, toPos) {
+      linkUI.attr("x1", fromPos.x)
+        .attr("y1", fromPos.y)
+        .attr("x2", toPos.x)
+        .attr("y2", toPos.y);
+    };
+  var cachedPos = { x: 0, y: 0 },
+    cachedFromPos = { x: 0, y: 0 },
+    cachedToPos = { x: 0, y: 0 };
 
   var api = {
     run: animationLoop,
@@ -107,6 +115,15 @@ module.exports = function(graph, settings) {
       nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
     }
 
+    for (var linkId in links) {
+      var linkInfo = links[linkId];
+      cachedFromPos.x = linkInfo.pos.from.x;
+      cachedFromPos.y = linkInfo.pos.from.y;
+      cachedToPos.x = linkInfo.pos.to.x;
+      cachedToPos.y = linkInfo.pos.to.y;
+      linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
+
+    }
     //edges.forEach(notifyEdgePositionChange);
   }
 
@@ -121,7 +138,7 @@ module.exports = function(graph, settings) {
     sceneInitialized = true;
 
     graph.forEachNode(addNode);
-    //graph.forEachLink(addLink);
+    graph.forEachLink(addLink);
 
     //var edgesUI = new vivasvg.ItemsControl();
     //edgesUI.setItemTemplate(_linkTemplate);
@@ -145,6 +162,7 @@ module.exports = function(graph, settings) {
       model: node,
       ui: nodeUI
     };
+
     elements.append(nodeUI);
   }
 
@@ -192,10 +210,16 @@ module.exports = function(graph, settings) {
 
 
   function addLink(link) {
-    edges.push(vivasvg.model({
+    var linkUI = linkBuilder(link);
+    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
+
+    links[link.id] = {
       pos: layout.getLinkPosition(link.id),
-      link: link
-    }));
+      model: link,
+      ui: linkUI
+    };
+
+    elements.append(linkUI);
   }
 
   function removeLink(node) {}
@@ -221,7 +245,7 @@ module.exports = function(graph, settings) {
           addNode(change.node);
         }
         if (change.link) {
-          //addLink(change.link);
+          addLink(change.link);
         }
       } else if (change.changeType === 'remove') {
         if (change.node) {
