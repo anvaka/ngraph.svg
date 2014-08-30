@@ -12,9 +12,9 @@ module.exports = function(graph, settings) {
     }
   });
 
-  var svgRoot = getSvgRoot(settings.container || document.body);
-  var elements = svg('g').attr("buffered-rendering", "dynamic");
-  svgRoot.append(elements);
+  var container = settings.container || document.body;
+  var svgRoot = createSvgRoot(container);
+  var scene = require('./lib/scene')(svgRoot);
 
   var nodes = Object.create(null);
   var links = Object.create(null);
@@ -94,7 +94,6 @@ module.exports = function(graph, settings) {
       cachedToPos.x = linkInfo.pos.to.x;
       cachedToPos.y = linkInfo.pos.to.y;
       linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
-
     }
   }
 
@@ -111,6 +110,7 @@ module.exports = function(graph, settings) {
     graph.forEachNode(addNode);
     graph.forEachLink(addLink);
 
+    scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
     //var edgesUI = new vivasvg.ItemsControl();
     //edgesUI.setItemTemplate(_linkTemplate);
     //edgesUI.setItemSource(edges);
@@ -142,18 +142,13 @@ module.exports = function(graph, settings) {
       ui: nodeUI
     };
 
-    elements.append(nodeUI);
+    scene.appendNode(nodeUI);
   }
 
   function removeNode(node) {
     var descriptor = nodes[node.id];
-    removeUI(descriptor && descriptor.ui);
+    scene.removeNode(descriptor && descriptor.ui);
     delete nodes[node.id];
-  }
-
-  function removeUI(ui) {
-    if (!ui) return;
-    // todo: implement me
   }
 
   function onMouseUp(e) {
@@ -204,12 +199,12 @@ module.exports = function(graph, settings) {
       ui: linkUI
     };
 
-    elements.append(linkUI);
+    scene.appendLink(linkUI);
   }
 
   function removeLink(link) {
     var descriptor = links[link.id];
-    removeUI(descriptor && descriptor.ui);
+    scene.removeLink(descriptor && descriptor.ui);
     delete links[link.id];
   }
 
@@ -251,7 +246,7 @@ module.exports = function(graph, settings) {
     isStable = false;
   }
 
-  function getSvgRoot(element) {
+  function createSvgRoot(element) {
     if (element instanceof SVGSVGElement) return element;
     var svgRoot = svg("svg");
     element.appendChild(svgRoot.element);
