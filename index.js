@@ -54,7 +54,6 @@ module.exports = function(graph, settings) {
       layout.dispose();
       api.off();
       disposed = true;
-
       //listenToGraphEvents(false);
       //listenToDomEvents(false);
     },
@@ -64,7 +63,7 @@ module.exports = function(graph, settings) {
         return;
       }
 
-      // todo: rebuild oll nodes.
+      // todo: rebuild all nodes.
       nodeBuilder = builderCallback;
 
       return this;
@@ -124,7 +123,6 @@ module.exports = function(graph, settings) {
       linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
 
     }
-    //edges.forEach(notifyEdgePositionChange);
   }
 
   function getDefaultLayout() {
@@ -222,7 +220,11 @@ module.exports = function(graph, settings) {
     elements.append(linkUI);
   }
 
-  function removeLink(node) {}
+  function removeLink(link) {
+    var descriptor = links[link.id];
+    removeUI(descriptor && descriptor.ui);
+    delete links[link.id];
+  }
 
   function listenToGraphEvents(isOn) {
     graph[isOn ? 'on' : 'off']('changed', onGraphChanged);
@@ -252,7 +254,7 @@ module.exports = function(graph, settings) {
           removeNode(change.node);
         }
         if (change.link) {
-          //removeLink(change.link);
+          removeLink(change.link);
         }
       }
     }
