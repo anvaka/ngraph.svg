@@ -23,24 +23,13 @@ module.exports = function(graph, settings) {
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
-  var nodeBuilder = function(node) {
-    return svg("rect")
-      .attr("width", 10)
-      .attr("height", 10)
-      .attr("fill", "#00a2e8");
-  },
-    nodePositionCallback = function(nodeUI, pos) {
-      nodeUI.attr("x", pos.x - 5).attr("y", pos.y - 5);
-    },
-    linkBuilder = function(linkUI, pos) {
-      return svg("line").attr("stroke", "#999");
-    },
-    linkPositionCallback = function(linkUI, fromPos, toPos) {
-      linkUI.attr("x1", fromPos.x)
-        .attr("y1", fromPos.y)
-        .attr("x2", toPos.x)
-        .attr("y2", toPos.y);
-    };
+  var defaultUI = require('./lib/defaultUI.js');
+
+  var nodeBuilder = defaultUI.nodeBuilder,
+    nodePositionCallback = defaultUI.nodePositionCallback,
+    linkBuilder = defaultUI.linkBuilder,
+    linkPositionCallback = defaultUI.linkPositionCallback;
+
   var cachedPos = { x: 0, y: 0 },
     cachedFromPos = { x: 0, y: 0 },
     cachedToPos = { x: 0, y: 0 };
