@@ -14,12 +14,12 @@ module.exports = function(graph, settings) {
 
   var container = settings.container || document.body;
   var svgRoot = createSvgRoot(container);
-  var scene = require('./lib/scene')(svgRoot);
 
   var nodes = Object.create(null);
   var links = Object.create(null);
 
   var layout = getDefaultLayout();
+  var scene = require('./lib/scene')(svgRoot, layout);
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
@@ -43,7 +43,7 @@ module.exports = function(graph, settings) {
       layout.dispose();
       api.off();
       disposed = true;
-      //listenToGraphEvents(false);
+      listenToGraphEvents(false);
       //listenToDomEvents(false);
     },
 
@@ -111,16 +111,8 @@ module.exports = function(graph, settings) {
     graph.forEachLink(addLink);
 
     scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
-    //var edgesUI = new vivasvg.ItemsControl();
-    //edgesUI.setItemTemplate(_linkTemplate);
-    //edgesUI.setItemSource(edges);
-    //zoomer.appendChild(edgesUI);
 
-    //nodesUI.setItemTemplate('<g transform="translate({{pos.x}}, {{pos.y}})" onmousedown="{{mousedown}}">' + _nodeTemplate + '</g>');
-    //nodesUI.setItemSource(nodes);
-    //zoomer.appendChild(nodesUI);
-
-    //listenToGraphEvents(true);
+    listenToGraphEvents(true);
     //listenToDomEvents(true);
   }
 
@@ -136,13 +128,13 @@ module.exports = function(graph, settings) {
     var nodeUI = nodeBuilder(node);
     if (!nodeUI) throw new Error('Node builder is supposed to return SVG object');
 
-    nodes[node.id] = {
+    var descriptor = nodes[node.id] = {
       pos: layout.getNodePosition(node.id),
       model: node,
       ui: nodeUI
     };
 
-    scene.appendNode(nodeUI);
+    scene.appendNode(descriptor);
   }
 
   function removeNode(node) {
