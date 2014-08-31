@@ -1,7 +1,7 @@
-var merge = require('ngraph.merge');
+module.exports = ngraphSvg;
 
-module.exports = function(graph, settings) {
-  settings = merge(settings, {});
+function ngraphSvg(graph, settings) {
+  settings = settings || {};
 
   var layout = require('./lib/defaultLayout.js')(graph, settings);
 
@@ -111,4 +111,4 @@ module.exports = function(graph, settings) {
   function resetStable() {
     isStable = false;
   }
-};
+}
