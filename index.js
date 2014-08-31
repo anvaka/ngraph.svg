@@ -1,14 +1,12 @@
 var merge = require('ngraph.merge');
-var svg = require('simplesvg');
 
 module.exports = function(graph, settings) {
   settings = merge(settings, {});
 
-  var layout = getDefaultLayout(settings);
+  var layout = require('./lib/defaultLayout.js')(graph, settings);
 
   var container = settings.container || document.body;
-  var svgRoot = createSvgRoot(container);
-  var scene = require('./lib/scene')(svgRoot, layout);
+  var scene = require('./lib/scene')(container, layout);
 
   var isStable = false;
   var disposed = false;
@@ -63,37 +61,15 @@ module.exports = function(graph, settings) {
     scene.renderFrame();
   }
 
-  function getDefaultLayout(settings) {
-    if (settings.layout) return settings.layout;
-
-    settings = merge(settings, {
-                  physics: {
-                    springLength: 30,
-                    springCoeff: 0.0008,
-                    dragCoeff: 0.01,
-                    gravity: -1.2,
-                    theta: 1
-                  }
-                });
-    var createLayout = require('ngraph.forcelayout');
-    var physics = require('ngraph.physics.simulator');
-
-    return createLayout(graph, physics(settings.physics));
-  }
-
   function initializeScene() {
-    sceneInitialized = true;
-
-    graph.forEachNode(addNode);
-    graph.forEachLink(addLink);
+    graph.forEachNode(scene.addNode);
+    graph.forEachLink(scene.addLink);
 
     scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
 
     listenToGraphEvents(true);
+    sceneInitialized = true;
   }
-
-  function addNode(node) { scene.addNode(node); }
-  function removeNode(node) { scene.removeNode(node); }
 
   function setLinkBuilder(builderCallback) {
     scene.setLinkBuilder(builderCallback);
@@ -104,10 +80,6 @@ module.exports = function(graph, settings) {
     scene.setNodeBuilder(builderCallback);
     return api;
   }
-
-  function addLink(link) { scene.addLink(link); }
-
-  function removeLink(link) { scene.removeLink(link); }
 
   function listenToGraphEvents(isOn) {
     graph[isOn ? 'on' : 'off']('changed', onGraphChanged);
@@ -120,17 +92,17 @@ module.exports = function(graph, settings) {
       var change = changes[i];
       if (change.changeType === 'add') {
         if (change.node) {
-          addNode(change.node);
+          scene.addNode(change.node);
         }
         if (change.link) {
-          addLink(change.link);
+          scene.addLink(change.link);
         }
       } else if (change.changeType === 'remove') {
         if (change.node) {
-          removeNode(change.node);
+          scene.removeNode(change.node);
         }
         if (change.link) {
-          removeLink(change.link);
+          scene.removeLink(change.link);
         }
       }
     }
@@ -138,13 +110,5 @@ module.exports = function(graph, settings) {
 
   function resetStable() {
     isStable = false;
-  }
-
-  function createSvgRoot(element) {
-    if (element instanceof SVGSVGElement) return element;
-    var svgRoot = svg("svg");
-    element.appendChild(svgRoot.element);
-
-    return svgRoot;
   }
 };
