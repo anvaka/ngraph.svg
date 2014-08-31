@@ -2,37 +2,17 @@ var merge = require('ngraph.merge');
 var svg = require('simplesvg');
 
 module.exports = function(graph, settings) {
-  settings = merge(settings, {
-    physics: {
-      springLength: 30,
-      springCoeff: 0.0008,
-      dragCoeff: 0.01,
-      gravity: -1.2,
-      theta: 1
-    }
-  });
+  settings = merge(settings, {});
+
+  var layout = getDefaultLayout(settings);
 
   var container = settings.container || document.body;
   var svgRoot = createSvgRoot(container);
-
-  var nodes = Object.create(null);
-  var links = Object.create(null);
-
-  var layout = getDefaultLayout();
   var scene = require('./lib/scene')(svgRoot, layout);
+
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
-  var defaultUI = require('./lib/defaultUI.js');
-
-  var nodeBuilder = defaultUI.nodeBuilder,
-    nodePositionCallback = defaultUI.nodePositionCallback,
-    linkBuilder = defaultUI.linkBuilder,
-    linkPositionCallback = defaultUI.linkPositionCallback;
-
-  var cachedPos = { x: 0, y: 0 },
-    cachedFromPos = { x: 0, y: 0 },
-    cachedToPos = { x: 0, y: 0 };
 
   var api = {
     run: animationLoop,
@@ -52,12 +32,12 @@ module.exports = function(graph, settings) {
     link: setLinkBuilder,
 
     placeNode: function(newPlaceCallback) {
-      nodePositionCallback = newPlaceCallback;
+      scene.placeNode(newPlaceCallback);
       return api;
     },
 
     placeLink: function(newPlaceLinkCallback) {
-      linkPositionCallback = newPlaceLinkCallback;
+      scene.placeLink(newPlaceCallback);
       return api;
     },
   };
@@ -80,27 +60,24 @@ module.exports = function(graph, settings) {
     if (disposed) return;
     if (!sceneInitialized) initializeScene();
 
-    for (var nodeId in nodes) {
-      var nodeInfo = nodes[nodeId];
-      cachedPos.x = nodeInfo.pos.x;
-      cachedPos.y = nodeInfo.pos.y;
-      nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
-    }
-
-    for (var linkId in links) {
-      var linkInfo = links[linkId];
-      cachedFromPos.x = linkInfo.pos.from.x;
-      cachedFromPos.y = linkInfo.pos.from.y;
-      cachedToPos.x = linkInfo.pos.to.x;
-      cachedToPos.y = linkInfo.pos.to.y;
-      linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
-    }
+    scene.renderFrame();
   }
 
-  function getDefaultLayout() {
+  function getDefaultLayout(settings) {
     if (settings.layout) return settings.layout;
+
+    settings = merge(settings, {
+                  physics: {
+                    springLength: 30,
+                    springCoeff: 0.0008,
+                    dragCoeff: 0.01,
+                    gravity: -1.2,
+                    theta: 1
+                  }
+                });
     var createLayout = require('ngraph.forcelayout');
     var physics = require('ngraph.physics.simulator');
+
     return createLayout(graph, physics(settings.physics));
   }
 
@@ -113,102 +90,27 @@ module.exports = function(graph, settings) {
     scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
 
     listenToGraphEvents(true);
-    //listenToDomEvents(true);
+  }
+
+  function addNode(node) { scene.addNode(node); }
+  function removeNode(node) { scene.removeNode(node); }
+
+  function setLinkBuilder(builderCallback) {
+    scene.setLinkBuilder(builderCallback);
+    return api;
   }
 
   function setNodeBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
-
-    nodeBuilder = builderCallback; // todo: rebuild all nodes?
-
+    scene.setNodeBuilder(builderCallback);
     return api;
   }
 
-  function addNode(node) {
-    var nodeUI = nodeBuilder(node);
-    if (!nodeUI) throw new Error('Node builder is supposed to return SVG object');
+  function addLink(link) { scene.addLink(link); }
 
-    var descriptor = nodes[node.id] = {
-      pos: layout.getNodePosition(node.id),
-      model: node,
-      ui: nodeUI
-    };
-
-    scene.appendNode(descriptor);
-  }
-
-  function removeNode(node) {
-    var descriptor = nodes[node.id];
-    scene.removeNode(descriptor && descriptor.ui);
-    delete nodes[node.id];
-  }
-
-  function onMouseUp(e) {
-    if (draggingNode) {
-      var node = draggingNode.node;
-      layout.pinNode(node, draggingNode.wasPinned);
-    }
-    draggingNode = null;
-  }
-
-  function onMouseDownNode(e, model) {
-    draggingNode = model;
-
-    draggingNode.wasPinned = layout.isNodePinned(model.node);
-    layout.pinNode(model.node, true);
-    var pos = zoomer.getModelPosition(e.clientX, e.clientY);
-    dragNodeDx = pos.x - model.pos.x;
-    dragNodeDy = pos.y - model.pos.y;
-    e.stopPropagation();
-    api.fire('nodeSelected', model.node);
-  }
-
-  function onMouseMove(e) {
-    if (!draggingNode) return;
-    resetStable();
-
-    var pos = zoomer.getModelPosition(e.clientX, e.clientY);
-    layout.setNodePosition(draggingNode.id, pos.x - dragNodeDx, pos.y - dragNodeDy);
-    notifyNodePositionChange(draggingNode);
-    e.stopPropagation();
-    e.preventDefault();
-  }
-
-  function setLinkBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('link builder should be a function');
-
-    linkBuilder = builderCallback;
-    return api;
-  }
-
-  function addLink(link) {
-    var linkUI = linkBuilder(link);
-    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
-
-    links[link.id] = {
-      pos: layout.getLinkPosition(link.id),
-      model: link,
-      ui: linkUI
-    };
-
-    scene.appendLink(linkUI);
-  }
-
-  function removeLink(link) {
-    var descriptor = links[link.id];
-    scene.removeLink(descriptor && descriptor.ui);
-    delete links[link.id];
-  }
+  function removeLink(link) { scene.removeLink(link); }
 
   function listenToGraphEvents(isOn) {
     graph[isOn ? 'on' : 'off']('changed', onGraphChanged);
-  }
-
-  function listenToDomEvents(isOn) {
-    var visual = svgDoc.getVisual();
-    var method = isOn ? 'addEventListener' : 'removeEventListener';
-    visual[method]('mousemove', onMouseMove);
-    visual[method]('mouseup', onMouseUp);
   }
 
   function onGraphChanged(changes) {
