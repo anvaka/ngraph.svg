@@ -5,42 +5,20 @@ graph.addLink(0, 1);
 var renderer = require('../../')(graph);
 renderer.run();
 
-},{"../../":2,"ngraph.graph":22}],2:[function(require,module,exports){
-var merge = require('ngraph.merge');
-var svg = require('simplesvg');
+},{"../../":2,"ngraph.graph":23}],2:[function(require,module,exports){
+module.exports = ngraphSvg;
 
-module.exports = function(graph, settings) {
-  settings = merge(settings, {
-    physics: {
-      springLength: 30,
-      springCoeff: 0.0008,
-      dragCoeff: 0.01,
-      gravity: -1.2,
-      theta: 1
-    }
-  });
+function ngraphSvg(graph, settings) {
+  settings = settings || {};
+
+  var layout = require('./lib/defaultLayout.js')(graph, settings);
 
   var container = settings.container || document.body;
-  var svgRoot = createSvgRoot(container);
+  var scene = require('./lib/scene')(container, layout);
 
-  var nodes = Object.create(null);
-  var links = Object.create(null);
-
-  var layout = getDefaultLayout();
-  var scene = require('./lib/scene')(svgRoot, layout);
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
-  var defaultUI = require('./lib/defaultUI.js');
-
-  var nodeBuilder = defaultUI.nodeBuilder,
-    nodePositionCallback = defaultUI.nodePositionCallback,
-    linkBuilder = defaultUI.linkBuilder,
-    linkPositionCallback = defaultUI.linkPositionCallback;
-
-  var cachedPos = { x: 0, y: 0 },
-    cachedFromPos = { x: 0, y: 0 },
-    cachedToPos = { x: 0, y: 0 };
 
   var api = {
     run: animationLoop,
@@ -60,12 +38,12 @@ module.exports = function(graph, settings) {
     link: setLinkBuilder,
 
     placeNode: function(newPlaceCallback) {
-      nodePositionCallback = newPlaceCallback;
+      scene.placeNode(newPlaceCallback);
       return api;
     },
 
     placeLink: function(newPlaceLinkCallback) {
-      linkPositionCallback = newPlaceLinkCallback;
+      scene.placeLink(newPlaceCallback);
       return api;
     },
   };
@@ -88,135 +66,31 @@ module.exports = function(graph, settings) {
     if (disposed) return;
     if (!sceneInitialized) initializeScene();
 
-    for (var nodeId in nodes) {
-      var nodeInfo = nodes[nodeId];
-      cachedPos.x = nodeInfo.pos.x;
-      cachedPos.y = nodeInfo.pos.y;
-      nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
-    }
-
-    for (var linkId in links) {
-      var linkInfo = links[linkId];
-      cachedFromPos.x = linkInfo.pos.from.x;
-      cachedFromPos.y = linkInfo.pos.from.y;
-      cachedToPos.x = linkInfo.pos.to.x;
-      cachedToPos.y = linkInfo.pos.to.y;
-      linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
-    }
-  }
-
-  function getDefaultLayout() {
-    if (settings.layout) return settings.layout;
-    var createLayout = require('ngraph.forcelayout');
-    var physics = require('ngraph.physics.simulator');
-    return createLayout(graph, physics(settings.physics));
+    scene.renderFrame();
   }
 
   function initializeScene() {
-    sceneInitialized = true;
-
-    graph.forEachNode(addNode);
-    graph.forEachLink(addLink);
+    graph.forEachNode(scene.addNode);
+    graph.forEachLink(scene.addLink);
 
     scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
 
     listenToGraphEvents(true);
-    //listenToDomEvents(true);
-  }
-
-  function setNodeBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
-
-    nodeBuilder = builderCallback; // todo: rebuild all nodes?
-
-    return api;
-  }
-
-  function addNode(node) {
-    var nodeUI = nodeBuilder(node);
-    if (!nodeUI) throw new Error('Node builder is supposed to return SVG object');
-
-    var descriptor = nodes[node.id] = {
-      pos: layout.getNodePosition(node.id),
-      model: node,
-      ui: nodeUI
-    };
-
-    scene.appendNode(descriptor);
-  }
-
-  function removeNode(node) {
-    var descriptor = nodes[node.id];
-    scene.removeNode(descriptor && descriptor.ui);
-    delete nodes[node.id];
-  }
-
-  function onMouseUp(e) {
-    if (draggingNode) {
-      var node = draggingNode.node;
-      layout.pinNode(node, draggingNode.wasPinned);
-    }
-    draggingNode = null;
-  }
-
-  function onMouseDownNode(e, model) {
-    draggingNode = model;
-
-    draggingNode.wasPinned = layout.isNodePinned(model.node);
-    layout.pinNode(model.node, true);
-    var pos = zoomer.getModelPosition(e.clientX, e.clientY);
-    dragNodeDx = pos.x - model.pos.x;
-    dragNodeDy = pos.y - model.pos.y;
-    e.stopPropagation();
-    api.fire('nodeSelected', model.node);
-  }
-
-  function onMouseMove(e) {
-    if (!draggingNode) return;
-    resetStable();
-
-    var pos = zoomer.getModelPosition(e.clientX, e.clientY);
-    layout.setNodePosition(draggingNode.id, pos.x - dragNodeDx, pos.y - dragNodeDy);
-    notifyNodePositionChange(draggingNode);
-    e.stopPropagation();
-    e.preventDefault();
+    sceneInitialized = true;
   }
 
   function setLinkBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('link builder should be a function');
-
-    linkBuilder = builderCallback;
+    scene.setLinkBuilder(builderCallback);
     return api;
   }
 
-  function addLink(link) {
-    var linkUI = linkBuilder(link);
-    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
-
-    links[link.id] = {
-      pos: layout.getLinkPosition(link.id),
-      model: link,
-      ui: linkUI
-    };
-
-    scene.appendLink(linkUI);
-  }
-
-  function removeLink(link) {
-    var descriptor = links[link.id];
-    scene.removeLink(descriptor && descriptor.ui);
-    delete links[link.id];
+  function setNodeBuilder(builderCallback) {
+    scene.setNodeBuilder(builderCallback);
+    return api;
   }
 
   function listenToGraphEvents(isOn) {
     graph[isOn ? 'on' : 'off']('changed', onGraphChanged);
-  }
-
-  function listenToDomEvents(isOn) {
-    var visual = svgDoc.getVisual();
-    var method = isOn ? 'addEventListener' : 'removeEventListener';
-    visual[method]('mousemove', onMouseMove);
-    visual[method]('mouseup', onMouseUp);
   }
 
   function onGraphChanged(changes) {
@@ -226,17 +100,17 @@ module.exports = function(graph, settings) {
       var change = changes[i];
       if (change.changeType === 'add') {
         if (change.node) {
-          addNode(change.node);
+          scene.addNode(change.node);
         }
         if (change.link) {
-          addLink(change.link);
+          scene.addLink(change.link);
         }
       } else if (change.changeType === 'remove') {
         if (change.node) {
-          removeNode(change.node);
+          scene.removeNode(change.node);
         }
         if (change.link) {
-          removeLink(change.link);
+          scene.removeLink(change.link);
         }
       }
     }
@@ -245,17 +119,33 @@ module.exports = function(graph, settings) {
   function resetStable() {
     isStable = false;
   }
+}
 
-  function createSvgRoot(element) {
-    if (element instanceof SVGSVGElement) return element;
-    var svgRoot = svg("svg");
-    element.appendChild(svgRoot.element);
+},{"./lib/defaultLayout.js":3,"./lib/scene":5,"ngraph.events":7}],3:[function(require,module,exports){
+var merge = require('ngraph.merge');
 
-    return svgRoot;
-  }
-};
+module.exports = getDefaultLayout;
 
-},{"./lib/defaultUI.js":3,"./lib/scene":4,"ngraph.events":6,"ngraph.forcelayout":7,"ngraph.merge":24,"ngraph.physics.simulator":25,"simplesvg":39}],3:[function(require,module,exports){
+function getDefaultLayout(graph, settings) {
+  if (settings.layout) return settings.layout;
+
+  settings = merge(settings, {
+    physics: {
+      springLength: 30,
+      springCoeff: 0.0008,
+      dragCoeff: 0.01,
+      gravity: -1.2,
+      theta: 1
+    }
+  });
+
+  var createLayout = require('ngraph.forcelayout');
+  var physics = require('ngraph.physics.simulator');
+
+  return createLayout(graph, physics(settings.physics));
+}
+
+},{"ngraph.forcelayout":8,"ngraph.merge":25,"ngraph.physics.simulator":26}],4:[function(require,module,exports){
 var svg = require('simplesvg');
 
 exports.nodeBuilder = nodeBuilder;
@@ -285,18 +175,40 @@ function linkPositionCallback(linkUI, fromPos, toPos) {
     .attr("y2", toPos.y);
 }
 
-},{"simplesvg":39}],4:[function(require,module,exports){
+},{"simplesvg":40}],5:[function(require,module,exports){
 var svg = require('simplesvg');
 var hammer = require('hammerjs');
 
 module.exports = scene;
 
-function scene(svgRoot, layout) {
+var NODE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
+var SCENE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
+var MOVE_EVENTS = 'panstart panmove panend';
+
+function scene(container, layout) {
+  var svgRoot = createSvgRoot(container);
   var sceneRoot = createSceneRoot(svgRoot);
   var sceneTransform = createSceneTransform(sceneRoot.element);
-  var linksLayer = addLayer('links', sceneRoot);
-  var nodesLayer = addLayer('nodes', sceneRoot);
-  var panStatus = {};
+  var panSession = {};
+  var panNode = 0;
+
+  var nodeLayer = addLayer('nodes', sceneRoot);
+  var linkLayer = addLayer('links', sceneRoot);
+
+  var nodes = Object.create(null);
+  var links = Object.create(null);
+
+  var fromX = 0, fromY = 0;
+  var cachedPos = { x: 0, y: 0 },
+      cachedFromPos = { x: 0, y: 0 },
+      cachedToPos = { x: 0, y: 0 };
+
+  var defaultUI = require('./defaultUI.js');
+  var nodeBuilder = defaultUI.nodeBuilder,
+    nodePositionCallback = defaultUI.nodePositionCallback,
+    linkBuilder = defaultUI.linkBuilder,
+    linkPositionCallback = defaultUI.linkPositionCallback;
+
   var currentTransform = {
     tx : 0,
     ty : 0,
@@ -304,12 +216,40 @@ function scene(svgRoot, layout) {
   };
 
   var api = {
-    appendNode: appendNode,
-    appendLink: appendLink,
-    moveTo: moveTo
+    renderFrame: renderFrame,
+
+    addNode: addNode,
+    removeNode: removeNode,
+    addLink: addLink,
+    removeLink: removeLink,
+
+    moveTo: moveTo,
+
+    setNodeBuilder: setNodeBuilder,
+    setLinkBuilder: setLinkBuilder,
+    placeNode: function(newPlaceCallback) { nodePositionCallback = newPlaceCallback; },
+    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; }
   };
 
   return api;
+
+  function renderFrame() {
+    for (var nodeId in nodes) {
+      var nodeInfo = nodes[nodeId];
+      cachedPos.x = nodeInfo.pos.x;
+      cachedPos.y = nodeInfo.pos.y;
+      nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
+    }
+
+    for (var linkId in links) {
+      var linkInfo = links[linkId];
+      cachedFromPos.x = linkInfo.pos.from.x;
+      cachedFromPos.y = linkInfo.pos.from.y;
+      cachedToPos.x = linkInfo.pos.to.x;
+      cachedToPos.y = linkInfo.pos.to.y;
+      linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
+    }
+  }
 
   function moveTo(x, y) {
     currentTransform.tx = x;
@@ -330,22 +270,100 @@ function scene(svgRoot, layout) {
     sceneTransform.matrix.a = sceneTransform.matrix.d = currentTransform.scale;
   }
 
-  function appendNode(nodeDescriptor) {
-    var ui = nodeDescriptor.ui;
-    nodesLayer.append(ui);
+  function setNodeBuilder(builderCallback) {
+    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
 
-    ui.element.node = nodeDescriptor;
-    hammer(ui.element).on('panstart panmove panend', handlePan);
+    nodeBuilder = builderCallback; // todo: rebuild all nodes?
   }
 
-  function appendLink(linkUI) {
-    linksLayer.append(linkUI);
+  function setLinkBuilder(builderCallback) {
+    if (typeof builderCallback !== "function") throw new Error('link builder callback is supposed to be a function');
+
+    linkBuilder = builderCallback; // todo: rebuild all nodes?
+  }
+
+  function addNode(node) {
+    var ui = nodeBuilder(node);
+    if (!ui) throw new Error('Node builder is supposed to return SVG object');
+
+    nodeLayer.append(ui);
+
+    var nodeDescriptor = {
+      pos: layout.getNodePosition(node.id),
+      model: node,
+      ui: ui
+    };
+
+    ui.element.node = nodeDescriptor;
+
+    nodeDescriptor.events = hammer(ui.element, NODE_MOVE_RECOGNIZER).on(MOVE_EVENTS, onNodePan);
+    nodes[node.id] = nodeDescriptor;
+  }
+
+  function removeNode(node) {
+    var descriptor = nodes[node.id];
+    if (!descriptor) return;
+
+    descriptor.events.off(MOVE_EVENTS);
+
+    var parent = descriptor.ui.element.parentNode;
+    if (parent) parent.removeChild(descriptor.ui.element);
+
+    delete nodes[node.id];
+  }
+
+
+  function addLink(link) {
+    var linkUI = linkBuilder(link);
+    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
+
+    links[link.id] = {
+      pos: layout.getLinkPosition(link.id),
+      model: link,
+      ui: linkUI
+    };
+
+    linkLayer.append(linkUI);
+  }
+
+  function removeLink(link) {
+    var descriptor = links[link.id];
+    if (!descriptor) return;
+
+    var parent = descriptor.ui.element.parentNode;
+    if (parent) parent.removeChild(descriptor.ui.element);
+
+    delete links[link.id];
+  }
+
+  function createSvgRoot(element) {
+    if (element instanceof SVGSVGElement) return element;
+    var svgRoot = svg("svg");
+    element.appendChild(svgRoot.element);
+
+    return svgRoot;
   }
 
   function createSceneRoot(svgRoot) {
     var scene = svg('g').attr("buffered-rendering", "dynamic");
     svgRoot.append(scene);
+
+    hammer(svgRoot.element, SCENE_MOVE_RECOGNIZER)
+      .on(MOVE_EVENTS, onScenePan);
+
     return scene;
+  }
+
+  function onScenePan(e) {
+    if (e.target !== svgRoot.element || panNode > 0) return;
+    if (e.type === 'panmove') {
+      currentTransform.tx = fromX + e.deltaX;
+      currentTransform.ty = fromY + e.deltaY;
+      updateTransformMatrix();
+    } else if (e.type === 'panstart') {
+      fromX = currentTransform.tx;
+      fromY = currentTransform.ty;
+    }
   }
 
   function addLayer(name, parent) {
@@ -354,24 +372,26 @@ function scene(svgRoot, layout) {
     return layer;
   }
 
-  function handlePan(e) {
+  function onNodePan(e) {
     var node = e.target.node;
     var model = node.model;
 
     var clickPosition = getModelPosition(e.center);
 
     if (e.type === 'panmove') {
-      var status = panStatus[model.id];
+      var status = panSession[model.id];
       layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
     } else if (e.type === 'panstart') {
-      panStatus[model.id] = {
+      panSession[model.id] = {
         isPinned: layout.isNodePinned(model),
         dx: clickPosition.x - node.pos.x,
         dy: clickPosition.y - node.pos.y
       };
       layout.pinNode(model, true);
+      panNode += 1;
     } else if (e.type === 'panend') {
-      layout.pinNode(model, panStatus[model.id].isPinned);
+      layout.pinNode(model, panSession[model.id].isPinned);
+      panNode -= 1;
     }
   }
 
@@ -383,7 +403,7 @@ function scene(svgRoot, layout) {
   }
 }
 
-},{"hammerjs":5,"simplesvg":39}],5:[function(require,module,exports){
+},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40}],6:[function(require,module,exports){
 (function(window, document, exportName, undefined) {
   'use strict';
 
@@ -2701,7 +2721,7 @@ if (typeof define == TYPE_FUNCTION && define.amd) {
 
 })(window, document, 'Hammer');
 
-},{}],6:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 module.exports = function(subject) {
   validateSubject(subject);
 
@@ -2791,7 +2811,7 @@ function validateSubject(subject) {
   }
 }
 
-},{}],7:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 module.exports = createLayout;
 
 // Maximum movement of the system at which system should be considered as stable
@@ -3049,7 +3069,7 @@ function createLayout(graph, physicsSimulator) {
   }
 }
 
-},{"ngraph.physics.primitives":8,"ngraph.physics.simulator":9}],8:[function(require,module,exports){
+},{"ngraph.physics.primitives":9,"ngraph.physics.simulator":10}],9:[function(require,module,exports){
 module.exports = {
   Body: Body,
   Vector2d: Vector2d,
@@ -3105,7 +3125,7 @@ Vector3d.prototype.reset = function () {
   this.x = this.y = this.z = 0;
 };
 
-},{}],9:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 /**
  * Manages a simulation of physical forces acting on bodies and springs.
  */
@@ -3344,7 +3364,7 @@ function physicsSimulator(settings) {
   }
 };
 
-},{"./lib/bounds":10,"./lib/createBody":11,"./lib/dragForce":12,"./lib/eulerIntegrator":13,"./lib/spring":14,"./lib/springForce":15,"ngraph.expose":16,"ngraph.merge":24,"ngraph.quadtreebh":17}],10:[function(require,module,exports){
+},{"./lib/bounds":11,"./lib/createBody":12,"./lib/dragForce":13,"./lib/eulerIntegrator":14,"./lib/spring":15,"./lib/springForce":16,"ngraph.expose":17,"ngraph.merge":25,"ngraph.quadtreebh":18}],11:[function(require,module,exports){
 module.exports = function (bodies, settings) {
   var random = require('ngraph.random').random(42);
   var boundingBox =  { x1: 0, y1: 0, x2: 0, y2: 0 };
@@ -3426,14 +3446,14 @@ module.exports = function (bodies, settings) {
   }
 }
 
-},{"ngraph.random":21}],11:[function(require,module,exports){
+},{"ngraph.random":22}],12:[function(require,module,exports){
 var physics = require('ngraph.physics.primitives');
 
 module.exports = function(pos) {
   return new physics.Body(pos);
 }
 
-},{"ngraph.physics.primitives":8}],12:[function(require,module,exports){
+},{"ngraph.physics.primitives":9}],13:[function(require,module,exports){
 /**
  * Represents drag force, which reduces force value on each step by given
  * coefficient.
@@ -3462,7 +3482,7 @@ module.exports = function (options) {
   return api;
 };
 
-},{"ngraph.expose":16,"ngraph.merge":24}],13:[function(require,module,exports){
+},{"ngraph.expose":17,"ngraph.merge":25}],14:[function(require,module,exports){
 /**
  * Performs forces integration, using given timestep. Uses Euler method to solve
  * differential equation (http://en.wikipedia.org/wiki/Euler_method ).
@@ -3506,7 +3526,7 @@ function integrate(bodies, timeStep) {
   return (tx * tx + ty * ty)/bodies.length;
 }
 
-},{}],14:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 module.exports = Spring;
 
 /**
@@ -3522,7 +3542,7 @@ function Spring(fromBody, toBody, length, coeff, weight) {
     this.weight = typeof weight === 'number' ? weight : 1;
 };
 
-},{}],15:[function(require,module,exports){
+},{}],16:[function(require,module,exports){
 /**
  * Represents spring force, which updates forces acting on two bodies, conntected
  * by a spring.
@@ -3574,7 +3594,7 @@ module.exports = function (options) {
   return api;
 }
 
-},{"ngraph.expose":16,"ngraph.merge":24,"ngraph.random":21}],16:[function(require,module,exports){
+},{"ngraph.expose":17,"ngraph.merge":25,"ngraph.random":22}],17:[function(require,module,exports){
 module.exports = exposeProperties;
 
 /**
@@ -3620,7 +3640,7 @@ function augment(source, target, key) {
   }
 }
 
-},{}],17:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 /**
  * This is Barnes Hut simulation algorithm. Implementation
  * is adopted to non-recursive solution, since certain browsers
@@ -3894,7 +3914,7 @@ module.exports = function (options) {
 };
 
 
-},{"./insertStack":18,"./isSamePosition":19,"./node":20,"ngraph.random":21}],18:[function(require,module,exports){
+},{"./insertStack":19,"./isSamePosition":20,"./node":21,"ngraph.random":22}],19:[function(require,module,exports){
 module.exports = InsertStack;
 
 /**
@@ -3939,7 +3959,7 @@ function InsertStackElement(node, body) {
     this.body = body; // physical body which needs to be inserted to node
 }
 
-},{}],19:[function(require,module,exports){
+},{}],20:[function(require,module,exports){
 module.exports = function isSamePosition(point1, point2) {
     var dx = Math.abs(point1.x - point2.x);
     var dy = Math.abs(point1.y - point2.y);
@@ -3947,7 +3967,7 @@ module.exports = function isSamePosition(point1, point2) {
     return (dx < 1e-8 && dy < 1e-8);
 };
 
-},{}],20:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 /**
  * Internal data structure to represent 2D QuadTree node
  */
@@ -3979,7 +3999,7 @@ module.exports = function Node() {
   this.isInternal = false;
 };
 
-},{}],21:[function(require,module,exports){
+},{}],22:[function(require,module,exports){
 module.exports = {
   random: random,
   randomIterator: randomIterator
@@ -4066,7 +4086,7 @@ function randomIterator(array, customRandom) {
     };
 }
 
-},{}],22:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 /**
  * @fileOverview Contains definition of the core graph object.
  */
@@ -4485,7 +4505,7 @@ function Link(fromId, toId, data, id) {
     this.id = id;
 }
 
-},{"ngraph.events":23}],23:[function(require,module,exports){
+},{"ngraph.events":24}],24:[function(require,module,exports){
 module.exports = function(subject) {
   validateSubject(subject);
 
@@ -4572,7 +4592,7 @@ function validateSubject(subject) {
   }
 }
 
-},{}],24:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 module.exports = merge;
 
 /**
@@ -4605,35 +4625,35 @@ function merge(target, options) {
   return target;
 }
 
-},{}],25:[function(require,module,exports){
-module.exports=require(9)
-},{"./lib/bounds":26,"./lib/createBody":27,"./lib/dragForce":28,"./lib/eulerIntegrator":29,"./lib/spring":30,"./lib/springForce":31,"ngraph.expose":32,"ngraph.merge":24,"ngraph.quadtreebh":34}],26:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 module.exports=require(10)
-},{"ngraph.random":38}],27:[function(require,module,exports){
+},{"./lib/bounds":27,"./lib/createBody":28,"./lib/dragForce":29,"./lib/eulerIntegrator":30,"./lib/spring":31,"./lib/springForce":32,"ngraph.expose":33,"ngraph.merge":25,"ngraph.quadtreebh":35}],27:[function(require,module,exports){
 module.exports=require(11)
-},{"ngraph.physics.primitives":33}],28:[function(require,module,exports){
+},{"ngraph.random":39}],28:[function(require,module,exports){
 module.exports=require(12)
-},{"ngraph.expose":32,"ngraph.merge":24}],29:[function(require,module,exports){
+},{"ngraph.physics.primitives":34}],29:[function(require,module,exports){
 module.exports=require(13)
-},{}],30:[function(require,module,exports){
+},{"ngraph.expose":33,"ngraph.merge":25}],30:[function(require,module,exports){
 module.exports=require(14)
 },{}],31:[function(require,module,exports){
 module.exports=require(15)
-},{"ngraph.expose":32,"ngraph.merge":24,"ngraph.random":38}],32:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 module.exports=require(16)
-},{}],33:[function(require,module,exports){
-module.exports=require(8)
-},{}],34:[function(require,module,exports){
+},{"ngraph.expose":33,"ngraph.merge":25,"ngraph.random":39}],33:[function(require,module,exports){
 module.exports=require(17)
-},{"./insertStack":35,"./isSamePosition":36,"./node":37,"ngraph.random":38}],35:[function(require,module,exports){
+},{}],34:[function(require,module,exports){
+module.exports=require(9)
+},{}],35:[function(require,module,exports){
 module.exports=require(18)
-},{}],36:[function(require,module,exports){
+},{"./insertStack":36,"./isSamePosition":37,"./node":38,"ngraph.random":39}],36:[function(require,module,exports){
 module.exports=require(19)
 },{}],37:[function(require,module,exports){
 module.exports=require(20)
 },{}],38:[function(require,module,exports){
 module.exports=require(21)
 },{}],39:[function(require,module,exports){
+module.exports=require(22)
+},{}],40:[function(require,module,exports){
 module.exports = svg;
 
 var svgns = "http://www.w3.org/2000/svg";
