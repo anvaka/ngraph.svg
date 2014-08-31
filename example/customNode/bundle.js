@@ -202,7 +202,7 @@ var MOVE_EVENTS = 'panstart panmove panend';
 function scene(container, layout) {
   var svgRoot = createSvgRoot(container);
   var sceneRoot = createSceneRoot(svgRoot);
-  var sceneTransform = createSceneTransform(sceneRoot.element);
+  var sceneTransform = createSceneTransform(sceneRoot);
   var panSession = {};
   var panNode = 0;
 
@@ -276,7 +276,7 @@ function scene(container, layout) {
   }
 
   function createSceneTransform(scene) {
-    var transform = svgRoot.element.createSVGTransform();
+    var transform = svgRoot.createSVGTransform();
     scene.transform.baseVal.appendItem(transform);
 
     return transform;
@@ -306,17 +306,39 @@ function scene(container, layout) {
 
     nodeLayer.append(ui);
 
+    var pos = layout.getNodePosition(node.id);
     var nodeDescriptor = {
-      pos: layout.getNodePosition(node.id),
+      pos: pos,
       model: node,
       ui: ui
     };
 
-    ui.element.node = nodeDescriptor;
-
     var recognizers = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
-    nodeDescriptor.events = hammer(ui.element, recognizers).on(MOVE_EVENTS, onNodePan);
+    nodeDescriptor.events = hammer(ui, recognizers).on(MOVE_EVENTS, onNodePan(pos, node));
     nodes[node.id] = nodeDescriptor;
+
+  }
+
+  function onNodePan(pos, model) {
+    return function onNodePan(e) {
+      var clickPosition = getModelPosition(e.center);
+
+      if (e.type === 'panmove') {
+        var status = panSession[model.id];
+        layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
+      } else if (e.type === 'panstart') {
+        panSession[model.id] = {
+          isPinned: layout.isNodePinned(model),
+          dx: clickPosition.x - pos.x,
+          dy: clickPosition.y - pos.y
+        };
+        layout.pinNode(model, true);
+        panNode += 1;
+      } else if (e.type === 'panend') {
+        layout.pinNode(model, panSession[model.id].isPinned);
+        panNode -= 1;
+      }
+    };
   }
 
   function removeNode(node) {
@@ -325,8 +347,8 @@ function scene(container, layout) {
 
     descriptor.events.off(MOVE_EVENTS);
 
-    var parent = descriptor.ui.element.parentNode;
-    if (parent) parent.removeChild(descriptor.ui.element);
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
 
     delete nodes[node.id];
   }
@@ -349,8 +371,8 @@ function scene(container, layout) {
     var descriptor = links[link.id];
     if (!descriptor) return;
 
-    var parent = descriptor.ui.element.parentNode;
-    if (parent) parent.removeChild(descriptor.ui.element);
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
 
     delete links[link.id];
   }
@@ -358,7 +380,7 @@ function scene(container, layout) {
   function createSvgRoot(element) {
     if (element instanceof SVGSVGElement) return element;
     var svgRoot = svg("svg");
-    element.appendChild(svgRoot.element);
+    element.appendChild(svgRoot);
 
     return svgRoot;
   }
@@ -366,7 +388,6 @@ function scene(container, layout) {
   function createSceneRoot(svgRoot) {
     var scene = svg('g').attr("buffered-rendering", "dynamic");
     svgRoot.append(scene);
-    var sceneElement = svgRoot.element;
 
     var sceneMoveRecognizer = { recognizers: [
       [hammer.Pan, { threshold: 1 }],
@@ -379,12 +400,12 @@ function scene(container, layout) {
       .on('pinchstart pinchin pinchout', onScreenPinch);
 
     var addWheelListener = require('wheel');
-    addWheelListener(sceneElement, onWheel);
+    addWheelListener(svgRoot, onWheel);
     return scene;
   }
 
   function onScreenPinch(e) {
-    if (e.target !== svgRoot.element) return;
+    if (e.target !== svgRoot) return;
 
     if (e.type === 'pinchstart') {
       screenPinchX = e.center.x;
@@ -413,7 +434,7 @@ function scene(container, layout) {
   }
 
   function onScenePan(e) {
-    if (e.target !== svgRoot.element || panNode > 0) return;
+    if (e.target !== svgRoot || panNode > 0) return;
     if (e.type === 'panmove') {
       currentTransform.tx = fromX + e.deltaX;
       currentTransform.ty = fromY + e.deltaY;
@@ -430,28 +451,6 @@ function scene(container, layout) {
     return layer;
   }
 
-  function onNodePan(e) {
-    var node = e.target.node;
-    var model = node.model;
-
-    var clickPosition = getModelPosition(e.center);
-
-    if (e.type === 'panmove') {
-      var status = panSession[model.id];
-      layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
-    } else if (e.type === 'panstart') {
-      panSession[model.id] = {
-        isPinned: layout.isNodePinned(model),
-        dx: clickPosition.x - node.pos.x,
-        dy: clickPosition.y - node.pos.y
-      };
-      layout.pinNode(model, true);
-      panNode += 1;
-    } else if (e.type === 'panend') {
-      layout.pinNode(model, panSession[model.id].isPinned);
-      panNode -= 1;
-    }
-  }
 
   function getModelPosition(pos) {
     return {
@@ -467,7 +466,7 @@ function scene(container, layout) {
   }
 }
 
-},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40,"wheel":41}],6:[function(require,module,exports){
+},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40,"wheel":42}],6:[function(require,module,exports){
 (function(window, document, exportName, undefined) {
   'use strict';
 
@@ -4719,34 +4718,28 @@ module.exports=require(21)
 module.exports=require(22)
 },{}],40:[function(require,module,exports){
 module.exports = svg;
+svg.compile = require('./lib/compile');
 
 var svgns = "http://www.w3.org/2000/svg";
 var xlinkns = "http://www.w3.org/1999/xlink";
 
 function svg(element) {
   var svgElement = element;
-  var api;
 
   if (typeof element === "string") {
     svgElement = window.document.createElementNS(svgns, element);
-  } else if (element && element.element) {
-    // user passes augmented element
-    svgElement = element.element;
-    api = element;
-    return api;
+  } else if (element.simplesvg) {
+    return element;
   }
 
-  api = {
-    attr: attr,
-    append: append,
-    element: svgElement
-  };
+  svgElement.simplesvg = true; // this is not good, since we are monkey patching svg
+  svgElement.attr = attr;
+  svgElement.append = append;
 
-  return api;
+  return svgElement;
 
-  function append(element) {
-    var child = svg(element);
-    svgElement.appendChild(child.element);
+  function append(child) {
+    svgElement.appendChild(svg(child));
 
     return child;
   }
@@ -4759,14 +4752,30 @@ function svg(element) {
         svgElement.removeAttributeNS(null, name);
       }
 
-      return api;
+      return svgElement;
     }
 
     return svgElement.getAttributeNS(null, name);
   }
 }
 
-},{}],41:[function(require,module,exports){
+},{"./lib/compile":41}],41:[function(require,module,exports){
+var parser = new DOMParser();
+var svg = require('../');
+
+module.exports = compile;
+
+function compile(svgText) {
+  try {
+    return svg(parser.parseFromString(
+      '<g xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg">' +
+      svgText + '</g>', "text/xml").documentElement);
+  } catch (e) {
+    throw e;
+  }
+}
+
+},{"../":40}],42:[function(require,module,exports){
 /**
  * This module unifies handling of mouse whee event accross different browsers
  *

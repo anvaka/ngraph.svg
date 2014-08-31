@@ -181,14 +181,12 @@ var hammer = require('hammerjs');
 
 module.exports = scene;
 
-var NODE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
-var SCENE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
 var MOVE_EVENTS = 'panstart panmove panend';
 
 function scene(container, layout) {
   var svgRoot = createSvgRoot(container);
   var sceneRoot = createSceneRoot(svgRoot);
-  var sceneTransform = createSceneTransform(sceneRoot.element);
+  var sceneTransform = createSceneTransform(sceneRoot);
   var panSession = {};
   var panNode = 0;
 
@@ -199,6 +197,7 @@ function scene(container, layout) {
   var links = Object.create(null);
 
   var fromX = 0, fromY = 0;
+  var screenPinchX, screenPinchY, lastScale;
   var cachedPos = { x: 0, y: 0 },
       cachedFromPos = { x: 0, y: 0 },
       cachedToPos = { x: 0, y: 0 };
@@ -224,11 +223,14 @@ function scene(container, layout) {
     removeLink: removeLink,
 
     moveTo: moveTo,
+    zoomTo: zoomTo,
 
     setNodeBuilder: setNodeBuilder,
     setLinkBuilder: setLinkBuilder,
     placeNode: function(newPlaceCallback) { nodePositionCallback = newPlaceCallback; },
-    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; }
+    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; },
+
+    dispose: dispose
   };
 
   return api;
@@ -258,7 +260,7 @@ function scene(container, layout) {
   }
 
   function createSceneTransform(scene) {
-    var transform = svgRoot.element.createSVGTransform();
+    var transform = svgRoot.createSVGTransform();
     scene.transform.baseVal.appendItem(transform);
 
     return transform;
@@ -288,16 +290,39 @@ function scene(container, layout) {
 
     nodeLayer.append(ui);
 
+    var pos = layout.getNodePosition(node.id);
     var nodeDescriptor = {
-      pos: layout.getNodePosition(node.id),
+      pos: pos,
       model: node,
       ui: ui
     };
 
-    ui.element.node = nodeDescriptor;
-
-    nodeDescriptor.events = hammer(ui.element, NODE_MOVE_RECOGNIZER).on(MOVE_EVENTS, onNodePan);
+    var recognizers = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
+    nodeDescriptor.events = hammer(ui, recognizers).on(MOVE_EVENTS, onNodePan(pos, node));
     nodes[node.id] = nodeDescriptor;
+
+  }
+
+  function onNodePan(pos, model) {
+    return function onNodePan(e) {
+      var clickPosition = getModelPosition(e.center);
+
+      if (e.type === 'panmove') {
+        var status = panSession[model.id];
+        layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
+      } else if (e.type === 'panstart') {
+        panSession[model.id] = {
+          isPinned: layout.isNodePinned(model),
+          dx: clickPosition.x - pos.x,
+          dy: clickPosition.y - pos.y
+        };
+        layout.pinNode(model, true);
+        panNode += 1;
+      } else if (e.type === 'panend') {
+        layout.pinNode(model, panSession[model.id].isPinned);
+        panNode -= 1;
+      }
+    };
   }
 
   function removeNode(node) {
@@ -306,8 +331,8 @@ function scene(container, layout) {
 
     descriptor.events.off(MOVE_EVENTS);
 
-    var parent = descriptor.ui.element.parentNode;
-    if (parent) parent.removeChild(descriptor.ui.element);
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
 
     delete nodes[node.id];
   }
@@ -330,8 +355,8 @@ function scene(container, layout) {
     var descriptor = links[link.id];
     if (!descriptor) return;
 
-    var parent = descriptor.ui.element.parentNode;
-    if (parent) parent.removeChild(descriptor.ui.element);
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
 
     delete links[link.id];
   }
@@ -339,7 +364,7 @@ function scene(container, layout) {
   function createSvgRoot(element) {
     if (element instanceof SVGSVGElement) return element;
     var svgRoot = svg("svg");
-    element.appendChild(svgRoot.element);
+    element.appendChild(svgRoot);
 
     return svgRoot;
   }
@@ -348,15 +373,52 @@ function scene(container, layout) {
     var scene = svg('g').attr("buffered-rendering", "dynamic");
     svgRoot.append(scene);
 
-    hammer(svgRoot.element, SCENE_MOVE_RECOGNIZER)
-      .on(MOVE_EVENTS, onScenePan);
+    var sceneMoveRecognizer = { recognizers: [
+      [hammer.Pan, { threshold: 1 }],
+      [hammer.Pinch, { enable: true }]
+    ] };
 
+    // somehow ios does not fire events on svg. Use body instead:
+    hammer(document.body, sceneMoveRecognizer)
+      .on(MOVE_EVENTS, onScenePan)
+      .on('pinchstart pinchin pinchout', onScreenPinch);
+
+    var addWheelListener = require('wheel');
+    addWheelListener(svgRoot, onWheel);
     return scene;
   }
 
+  function onScreenPinch(e) {
+    if (e.target !== svgRoot) return;
+
+    if (e.type === 'pinchstart') {
+      screenPinchX = e.center.x;
+      screenPinchY = e.center.y;
+      lastScale = e.scale;
+    } else {
+      var direction = lastScale > e.scale ? -1 : 1;
+      lastScale = e.scale;
+      var factor = (1 + direction * 0.04);
+      zoomTo(screenPinchX, screenPinchY, factor);
+    }
+  }
+
+  function onWheel(e) {
+    var isZoomIn = e.deltaY < 0;
+    var direction = isZoomIn ? 1 : -1;
+    var factor = (1 + direction * 0.1);
+    zoomTo(e.clientX, e.clientY, factor);
+  }
+
+  function zoomTo(x, y, factor) {
+    currentTransform.tx = x - factor * (x - currentTransform.tx);
+    currentTransform.ty = y - factor * (y - currentTransform.ty);
+    currentTransform.scale *= factor;
+    updateTransformMatrix();
+  }
+
   function onScenePan(e) {
-    if (e.target !== svgRoot.element || panNode > 0) return;
-    console.log('scene');
+    if (e.target !== svgRoot || panNode > 0) return;
     if (e.type === 'panmove') {
       currentTransform.tx = fromX + e.deltaX;
       currentTransform.ty = fromY + e.deltaY;
@@ -373,29 +435,6 @@ function scene(container, layout) {
     return layer;
   }
 
-  function onNodePan(e) {
-    var node = e.target.node;
-    var model = node.model;
-
-    console.log('node');
-    var clickPosition = getModelPosition(e.center);
-
-    if (e.type === 'panmove') {
-      var status = panSession[model.id];
-      layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
-    } else if (e.type === 'panstart') {
-      panSession[model.id] = {
-        isPinned: layout.isNodePinned(model),
-        dx: clickPosition.x - node.pos.x,
-        dy: clickPosition.y - node.pos.y
-      };
-      layout.pinNode(model, true);
-      panNode += 1;
-    } else if (e.type === 'panend') {
-      layout.pinNode(model, panSession[model.id].isPinned);
-      panNode -= 1;
-    }
-  }
 
   function getModelPosition(pos) {
     return {
@@ -403,9 +442,15 @@ function scene(container, layout) {
       y: (pos.y - currentTransform.ty)/currentTransform.scale,
     };
   }
+
+  function dispose() {
+    // todo: implement me:
+    // 1. scene hammer
+    // 2. scene mouse wheel
+  }
 }
 
-},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40}],6:[function(require,module,exports){
+},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40,"wheel":42}],6:[function(require,module,exports){
 (function(window, document, exportName, undefined) {
   'use strict';
 
@@ -4657,34 +4702,28 @@ module.exports=require(21)
 module.exports=require(22)
 },{}],40:[function(require,module,exports){
 module.exports = svg;
+svg.compile = require('./lib/compile');
 
 var svgns = "http://www.w3.org/2000/svg";
 var xlinkns = "http://www.w3.org/1999/xlink";
 
 function svg(element) {
   var svgElement = element;
-  var api;
 
   if (typeof element === "string") {
     svgElement = window.document.createElementNS(svgns, element);
-  } else if (element && element.element) {
-    // user passes augmented element
-    svgElement = element.element;
-    api = element;
-    return api;
+  } else if (element.simplesvg) {
+    return element;
   }
 
-  api = {
-    attr: attr,
-    append: append,
-    element: svgElement
-  };
+  svgElement.simplesvg = true; // this is not good, since we are monkey patching svg
+  svgElement.attr = attr;
+  svgElement.append = append;
 
-  return api;
+  return svgElement;
 
-  function append(element) {
-    var child = svg(element);
-    svgElement.appendChild(child.element);
+  function append(child) {
+    svgElement.appendChild(svg(child));
 
     return child;
   }
@@ -4697,11 +4736,101 @@ function svg(element) {
         svgElement.removeAttributeNS(null, name);
       }
 
-      return api;
+      return svgElement;
     }
 
     return svgElement.getAttributeNS(null, name);
   }
+}
+
+},{"./lib/compile":41}],41:[function(require,module,exports){
+var parser = new DOMParser();
+var svg = require('../');
+
+module.exports = compile;
+
+function compile(svgText) {
+  try {
+    return svg(parser.parseFromString(
+      '<g xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg">' +
+      svgText + '</g>', "text/xml").documentElement);
+  } catch (e) {
+    throw e;
+  }
+}
+
+},{"../":40}],42:[function(require,module,exports){
+/**
+ * This module unifies handling of mouse whee event accross different browsers
+ *
+ * See https://developer.mozilla.org/en-US/docs/Web/Reference/Events/wheel?redirectlocale=en-US&redirectslug=DOM%2FMozilla_event_reference%2Fwheel
+ * for more details
+ *
+ * Usage:
+ *  var addWheelListener = require('wheel');
+ *  addWheelListener(domElement, function (e) {
+ *    // mouse wheel event
+ *  });
+ */
+module.exports = addWheelListener;
+
+var prefix = "", _addEventListener, onwheel, support;
+
+// detect event model
+if ( window.addEventListener ) {
+    _addEventListener = "addEventListener";
+} else {
+    _addEventListener = "attachEvent";
+    prefix = "on";
+}
+
+// detect available wheel event
+support = "onwheel" in document.createElement("div") ? "wheel" : // Modern browsers support "wheel"
+          document.onmousewheel !== undefined ? "mousewheel" : // Webkit and IE support at least "mousewheel"
+          "DOMMouseScroll"; // let's assume that remaining browsers are older Firefox
+
+function addWheelListener( elem, callback, useCapture ) {
+    _addWheelListener( elem, support, callback, useCapture );
+
+    // handle MozMousePixelScroll in older Firefox
+    if( support == "DOMMouseScroll" ) {
+        _addWheelListener( elem, "MozMousePixelScroll", callback, useCapture );
+    }
+};
+
+function _addWheelListener( elem, eventName, callback, useCapture ) {
+  elem[ _addEventListener ]( prefix + eventName, support == "wheel" ? callback : function( originalEvent ) {
+    !originalEvent && ( originalEvent = window.event );
+
+    // create a normalized event object
+    var event = {
+      // keep a ref to the original event object
+      originalEvent: originalEvent,
+      target: originalEvent.target || originalEvent.srcElement,
+      type: "wheel",
+      deltaMode: originalEvent.type == "MozMousePixelScroll" ? 0 : 1,
+      deltaX: 0,
+      delatZ: 0,
+      preventDefault: function() {
+        originalEvent.preventDefault ?
+            originalEvent.preventDefault() :
+            originalEvent.returnValue = false;
+      }
+    };
+
+    // calculate deltaY (and deltaX) according to the event
+    if ( support == "mousewheel" ) {
+      event.deltaY = - 1/40 * originalEvent.wheelDelta;
+      // Webkit also support wheelDeltaX
+      originalEvent.wheelDeltaX && ( event.deltaX = - 1/40 * originalEvent.wheelDeltaX );
+    } else {
+      event.deltaY = originalEvent.detail;
+    }
+
+    // it's time to fire the callback
+    return callback( event );
+
+  }, useCapture || false );
 }
 
 },{}]},{},[1])
