@@ -1,11 +1,27 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 var graph = require('ngraph.graph')();
-graph.addLink(0, 1);
+var svg = require('simplesvg');
 
-var renderer = require('../../')(graph);
+graph.addLink(0, 1);
+graph.addLink(2, 1);
+
+var renderer = require('../../')(graph, {
+  physics: {
+    springLength: 60
+  }
+});
+renderer.node(function(node) {
+  return svg("rect")
+    .attr("width", 42)
+    .attr("height", 42)
+    .attr("fill", "#00a2e8");
+}).placeNode(function nodePositionCallback(nodeUI, pos) {
+  nodeUI.attr("x", pos.x - 21).attr("y", pos.y - 21);
+});
+
 renderer.run();
 
-},{"../../":2,"ngraph.graph":23}],2:[function(require,module,exports){
+},{"../../":2,"ngraph.graph":23,"simplesvg":40}],2:[function(require,module,exports){
 module.exports = ngraphSvg;
 
 function ngraphSvg(graph, settings) {
@@ -181,7 +197,6 @@ var hammer = require('hammerjs');
 
 module.exports = scene;
 
-var NODE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
 var SCENE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
 var MOVE_EVENTS = 'panstart panmove panend';
 
@@ -296,7 +311,8 @@ function scene(container, layout) {
 
     ui.element.node = nodeDescriptor;
 
-    nodeDescriptor.events = hammer(ui.element, NODE_MOVE_RECOGNIZER).on(MOVE_EVENTS, onNodePan);
+    var recognizers = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
+    nodeDescriptor.events = hammer(ui.element, recognizers).on(MOVE_EVENTS, onNodePan);
     nodes[node.id] = nodeDescriptor;
   }
 
@@ -377,7 +393,6 @@ function scene(container, layout) {
     var node = e.target.node;
     var model = node.model;
 
-    console.log('node');
     var clickPosition = getModelPosition(e.center);
 
     if (e.type === 'panmove') {
