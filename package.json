@@ -23,7 +23,8 @@
     "ngraph.events": "0.0.3",
     "ngraph.forcelayout": "0.0.10",
     "ngraph.physics.simulator": "0.0.6",
-    "simplesvg": "0.0.0"
+    "simplesvg": "0.0.0",
+    "wheel": "0.0.0"
   },
   "devDependencies": {
     "ngraph.graph": "0.0.3",

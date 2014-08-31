@@ -197,7 +197,6 @@ var hammer = require('hammerjs');
 
 module.exports = scene;
 
-var SCENE_MOVE_RECOGNIZER = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
 var MOVE_EVENTS = 'panstart panmove panend';
 
 function scene(container, layout) {
@@ -239,11 +238,14 @@ function scene(container, layout) {
     removeLink: removeLink,
 
     moveTo: moveTo,
+    zoomTo: zoomTo,
 
     setNodeBuilder: setNodeBuilder,
     setLinkBuilder: setLinkBuilder,
     placeNode: function(newPlaceCallback) { nodePositionCallback = newPlaceCallback; },
-    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; }
+    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; },
+
+    dispose: dispose
   };
 
   return api;
@@ -363,16 +365,42 @@ function scene(container, layout) {
   function createSceneRoot(svgRoot) {
     var scene = svg('g').attr("buffered-rendering", "dynamic");
     svgRoot.append(scene);
+    var sceneElement = svgRoot.element;
 
-    hammer(svgRoot.element, SCENE_MOVE_RECOGNIZER)
-      .on(MOVE_EVENTS, onScenePan);
+    var sceneMoveRecognizer = { recognizers: [
+      [hammer.Pan, { threshold: 1 }],
+      [hammer.Pinch, { enable: true }]
+    ] };
 
+    hammer(sceneElement, sceneMoveRecognizer)
+      .on(MOVE_EVENTS, onScenePan)
+      .on('pinchin pinchout', onScreenPinch);
+
+    var addWheelListener = require('wheel');
+    addWheelListener(sceneElement, onWheel);
     return scene;
+  }
+
+  function onScreenPinch(e) {
+    zoomTo(e.center.x, e.center.y, e.scale);
+  }
+
+  function onWheel(e) {
+    var isZoomIn = e.deltaY < 0;
+    var direction = isZoomIn ? 1 : -1;
+    var factor = (1 + direction * 0.1);
+    zoomTo(e.clientX, e.clientY, currentTransform.scale * factor);
+  }
+
+  function zoomTo(x, y, factor) {
+    currentTransform.tx = x - factor * (x - currentTransform.tx);
+    currentTransform.ty = y - factor * (y - currentTransform.ty);
+    currentTransform.scale = factor;
+    updateTransformMatrix();
   }
 
   function onScenePan(e) {
     if (e.target !== svgRoot.element || panNode > 0) return;
-    console.log('scene');
     if (e.type === 'panmove') {
       currentTransform.tx = fromX + e.deltaX;
       currentTransform.ty = fromY + e.deltaY;
@@ -418,9 +446,15 @@ function scene(container, layout) {
       y: (pos.y - currentTransform.ty)/currentTransform.scale,
     };
   }
+
+  function dispose() {
+    // todo: implement me:
+    // 1. scene hammer
+    // 2. scene mouse wheel
+  }
 }
 
-},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40}],6:[function(require,module,exports){
+},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40,"wheel":41}],6:[function(require,module,exports){
 (function(window, document, exportName, undefined) {
   'use strict';
 
@@ -4717,6 +4751,80 @@ function svg(element) {
 
     return svgElement.getAttributeNS(null, name);
   }
+}
+
+},{}],41:[function(require,module,exports){
+/**
+ * This module unifies handling of mouse whee event accross different browsers
+ *
+ * See https://developer.mozilla.org/en-US/docs/Web/Reference/Events/wheel?redirectlocale=en-US&redirectslug=DOM%2FMozilla_event_reference%2Fwheel
+ * for more details
+ *
+ * Usage:
+ *  var addWheelListener = require('wheel');
+ *  addWheelListener(domElement, function (e) {
+ *    // mouse wheel event
+ *  });
+ */
+module.exports = addWheelListener;
+
+var prefix = "", _addEventListener, onwheel, support;
+
+// detect event model
+if ( window.addEventListener ) {
+    _addEventListener = "addEventListener";
+} else {
+    _addEventListener = "attachEvent";
+    prefix = "on";
+}
+
+// detect available wheel event
+support = "onwheel" in document.createElement("div") ? "wheel" : // Modern browsers support "wheel"
+          document.onmousewheel !== undefined ? "mousewheel" : // Webkit and IE support at least "mousewheel"
+          "DOMMouseScroll"; // let's assume that remaining browsers are older Firefox
+
+function addWheelListener( elem, callback, useCapture ) {
+    _addWheelListener( elem, support, callback, useCapture );
+
+    // handle MozMousePixelScroll in older Firefox
+    if( support == "DOMMouseScroll" ) {
+        _addWheelListener( elem, "MozMousePixelScroll", callback, useCapture );
+    }
+};
+
+function _addWheelListener( elem, eventName, callback, useCapture ) {
+  elem[ _addEventListener ]( prefix + eventName, support == "wheel" ? callback : function( originalEvent ) {
+    !originalEvent && ( originalEvent = window.event );
+
+    // create a normalized event object
+    var event = {
+      // keep a ref to the original event object
+      originalEvent: originalEvent,
+      target: originalEvent.target || originalEvent.srcElement,
+      type: "wheel",
+      deltaMode: originalEvent.type == "MozMousePixelScroll" ? 0 : 1,
+      deltaX: 0,
+      delatZ: 0,
+      preventDefault: function() {
+        originalEvent.preventDefault ?
+            originalEvent.preventDefault() :
+            originalEvent.returnValue = false;
+      }
+    };
+
+    // calculate deltaY (and deltaX) according to the event
+    if ( support == "mousewheel" ) {
+      event.deltaY = - 1/40 * originalEvent.wheelDelta;
+      // Webkit also support wheelDeltaX
+      originalEvent.wheelDeltaX && ( event.deltaX = - 1/40 * originalEvent.wheelDeltaX );
+    } else {
+      event.deltaY = originalEvent.detail;
+    }
+
+    // it's time to fire the callback
+    return callback( event );
+
+  }, useCapture || false );
 }
 
 },{}]},{},[1])
