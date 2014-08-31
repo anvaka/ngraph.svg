@@ -213,6 +213,7 @@ function scene(container, layout) {
   var links = Object.create(null);
 
   var fromX = 0, fromY = 0;
+  var screenPinchX, screenPinchY, lastScale;
   var cachedPos = { x: 0, y: 0 },
       cachedFromPos = { x: 0, y: 0 },
       cachedToPos = { x: 0, y: 0 };
@@ -372,9 +373,10 @@ function scene(container, layout) {
       [hammer.Pinch, { enable: true }]
     ] };
 
-    hammer(sceneElement, sceneMoveRecognizer)
+    // somehow ios does not fire events on svg. Use body instead:
+    hammer(document.body, sceneMoveRecognizer)
       .on(MOVE_EVENTS, onScenePan)
-      .on('pinchin pinchout', onScreenPinch);
+      .on('pinchstart pinchin pinchout', onScreenPinch);
 
     var addWheelListener = require('wheel');
     addWheelListener(sceneElement, onWheel);
@@ -382,20 +384,31 @@ function scene(container, layout) {
   }
 
   function onScreenPinch(e) {
-    zoomTo(e.center.x, e.center.y, e.scale);
+    if (e.target !== svgRoot.element) return;
+
+    if (e.type === 'pinchstart') {
+      screenPinchX = e.center.x;
+      screenPinchY = e.center.y;
+      lastScale = e.scale;
+    } else {
+      var direction = lastScale > e.scale ? -1 : 1;
+      lastScale = e.scale;
+      var factor = (1 + direction * 0.04);
+      zoomTo(screenPinchX, screenPinchY, factor);
+    }
   }
 
   function onWheel(e) {
     var isZoomIn = e.deltaY < 0;
     var direction = isZoomIn ? 1 : -1;
     var factor = (1 + direction * 0.1);
-    zoomTo(e.clientX, e.clientY, currentTransform.scale * factor);
+    zoomTo(e.clientX, e.clientY, factor);
   }
 
   function zoomTo(x, y, factor) {
     currentTransform.tx = x - factor * (x - currentTransform.tx);
     currentTransform.ty = y - factor * (y - currentTransform.ty);
-    currentTransform.scale = factor;
+    currentTransform.scale *= factor;
     updateTransformMatrix();
   }
 
