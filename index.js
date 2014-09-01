@@ -10,6 +10,7 @@ function ngraphSvg(graph, settings) {
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
+  var scene = require('./lib/scene')(container, layout);
 
   var api = {
     run: animationLoop,
@@ -25,11 +26,11 @@ function ngraphSvg(graph, settings) {
     placeNode: placeNode,
 
     placeLink: placeLink,
+
+    svgRoot: scene.svgRoot
   };
 
   require('ngraph.events')(api);
-
-  var scene = require('./lib/scene')(container, layout);
 
   return api;
 
@@ -42,7 +43,7 @@ function ngraphSvg(graph, settings) {
     }
 
   function placeLink(newPlaceLinkCallback) {
-    scene.placeLink(newPlaceCallback);
+    scene.placeLink(newPlaceLinkCallback);
     return api;
   }
 
