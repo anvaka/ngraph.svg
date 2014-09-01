@@ -17,32 +17,38 @@ function ngraphSvg(graph, settings) {
     renderOneFrame: renderOneFrame,
     layout: layout,
 
-    dispose: function() {
-      layout.dispose();
-      api.off();
-      disposed = true;
-      listenToGraphEvents(false);
-      //listenToDomEvents(false);
-    },
+    dispose: dispose,
 
     node: setNodeBuilder,
 
     link: setLinkBuilder,
 
-    placeNode: function(newPlaceCallback) {
-      scene.placeNode(newPlaceCallback);
-      return api;
-    },
+    placeNode: placeNode,
 
-    placeLink: function(newPlaceLinkCallback) {
-      scene.placeLink(newPlaceCallback);
-      return api;
-    },
+    placeLink: placeLink,
   };
 
   require('ngraph.events')(api);
 
   return api;
+
+  function dispose() {
+      layout.dispose();
+      api.off();
+      disposed = true;
+      listenToGraphEvents(false);
+      //listenToDomEvents(false);
+    }
+
+  function placeLink(newPlaceLinkCallback) {
+    scene.placeLink(newPlaceCallback);
+    return api;
+  }
+
+  function placeNode(newPlaceCallback) {
+    scene.placeNode(newPlaceCallback);
+    return api;
+  }
 
   function animationLoop() {
     if (disposed) return;
