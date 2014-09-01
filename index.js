@@ -6,7 +6,6 @@ function ngraphSvg(graph, settings) {
   var layout = require('./lib/defaultLayout.js')(graph, settings);
 
   var container = settings.container || document.body;
-  var scene = require('./lib/scene')(container, layout);
 
   var isStable = false;
   var disposed = false;
@@ -29,6 +28,8 @@ function ngraphSvg(graph, settings) {
   };
 
   require('ngraph.events')(api);
+
+  var scene = require('./lib/scene')(container, layout);
 
   return api;
 
