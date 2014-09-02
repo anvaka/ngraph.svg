@@ -296,6 +296,7 @@ function ngraphSvg(graph, settings) {
   function onNodePan(pos, model) {
     return function onNodePan(e) {
       var clickPosition = getModelPosition(e.center);
+      resetStable();
 
       if (e.type === 'panmove') {
         var status = panSession[model.id];
