@@ -224,7 +224,7 @@ function ngraphSvg(graph, settings) {
     ] };
 
     // somehow ios does not fire events on svg. Use body instead:
-    hammer(document.body, sceneMoveRecognizer)
+    hammer(container, sceneMoveRecognizer)
       .on(MOVE_EVENTS, onScenePan)
       .on('pinchstart pinchin pinchout', onScreenPinch);
 
