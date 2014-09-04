@@ -69,12 +69,12 @@ function ngraphSvg(graph, settings) {
   return api;
 
   function dispose() {
-      layout.dispose();
-      api.off();
-      disposed = true;
-      listenToGraphEvents(false);
-      //listenToDomEvents(false);
-    }
+    layout.dispose();
+    api.off();
+    disposed = true;
+    listenToGraphEvents(false);
+    releaseDOMEvents();
+  }
 
   function placeLink(newPlaceLinkCallback) {
     linkPositionCallback = newPlaceLinkCallback;
@@ -296,10 +296,11 @@ function ngraphSvg(graph, settings) {
   function onNodePan(pos, model) {
     return function onNodePan(e) {
       var clickPosition = getModelPosition(e.center);
+      var status;
       resetStable();
 
       if (e.type === 'panmove') {
-        var status = panSession[model.id];
+        status = panSession[model.id];
         layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
       } else if (e.type === 'panstart') {
         panSession[model.id] = {
@@ -310,17 +311,27 @@ function ngraphSvg(graph, settings) {
         layout.pinNode(model, true);
         panNode += 1;
       } else if (e.type === 'panend') {
-        layout.pinNode(model, panSession[model.id].isPinned);
+        status = panSession[model.id];
+        if (status) layout.pinNode(model, status.isPinned);
+
         panNode -= 1;
+        if (panNode < 0) panNode = 0;
       }
     };
+  }
+
+  function releaseDOMEvents() {
+    for (var key in nodes) {
+      var descriptor = nodes[key];
+      if (descriptor.events) descriptor.events.destroy();
+    }
   }
 
   function removeNode(node) {
     var descriptor = nodes[node.id];
     if (!descriptor) return;
 
-    descriptor.events.off(MOVE_EVENTS);
+    descriptor.events.destroy();
 
     var parent = descriptor.ui.parentNode;
     if (parent) parent.removeChild(descriptor.ui);
