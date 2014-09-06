@@ -250,7 +250,9 @@ function ngraphSvg(graph, settings) {
     var isZoomIn = e.deltaY < 0;
     var direction = isZoomIn ? 1 : -1;
     var factor = (1 + direction * 0.1);
-    zoomTo(e.clientX, e.clientY, factor);
+    var x = e.offsetX === undefined ? e.layerX : e.offsetX;
+    var y = e.offsetY === undefined ? e.layerY : e.offsetY;
+    zoomTo(x, y, factor);
   }
 
   function zoomTo(x, y, factor) {
