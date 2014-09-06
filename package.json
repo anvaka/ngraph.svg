@@ -1,6 +1,6 @@
 {
   "name": "ngraph.svg",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Svg based graph rendering",
   "main": "index.js",
   "scripts": {
