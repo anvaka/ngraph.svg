@@ -253,6 +253,7 @@ function ngraphSvg(graph, settings) {
     var x = e.offsetX === undefined ? e.layerX : e.offsetX;
     var y = e.offsetY === undefined ? e.layerY : e.offsetY;
     zoomTo(x, y, factor);
+    e.preventDefault();
   }
 
   function zoomTo(x, y, factor) {
