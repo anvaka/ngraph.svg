@@ -21,10 +21,10 @@
   "dependencies": {
     "hammerjs": "^2.0.2",
     "ngraph.events": "0.0.3",
-    "ngraph.forcelayout": "0.0.10",
-    "ngraph.physics.simulator": "0.0.6",
-    "simplesvg": "0.0.2",
-    "ngraph.graph": "0.0.3",
+    "ngraph.forcelayout": "0.0.12",
+    "ngraph.physics.simulator": "0.0.8",
+    "simplesvg": "0.0.3",
+    "ngraph.graph": "0.0.6",
     "ngraph.merge": "0.0.1",
     "wheel": "0.0.0"
   }

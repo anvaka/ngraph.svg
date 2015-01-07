@@ -5,6 +5,8 @@ var MOVE_EVENTS = 'panstart panmove panend';
 
 module.exports = ngraphSvg;
 
+ngraphSvg.svg = svg; // let consumers use this directly
+
 function ngraphSvg(graph, settings) {
   settings = settings || {};
 
