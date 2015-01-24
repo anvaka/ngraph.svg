@@ -21,8 +21,15 @@ renderer.node(function(node) {
 
 renderer.run();
 
-},{"../../":2,"ngraph.graph":23,"simplesvg":40}],2:[function(require,module,exports){
+},{"../../":2,"ngraph.graph":10,"simplesvg":26}],2:[function(require,module,exports){
+var svg = require('simplesvg');
+var hammer = require('hammerjs');
+
+var MOVE_EVENTS = 'panstart panmove panend';
+
 module.exports = ngraphSvg;
+
+ngraphSvg.svg = svg; // let consumers use this directly
 
 function ngraphSvg(graph, settings) {
   settings = settings || {};
@@ -30,50 +37,87 @@ function ngraphSvg(graph, settings) {
   var layout = require('./lib/defaultLayout.js')(graph, settings);
 
   var container = settings.container || document.body;
-  var scene = require('./lib/scene')(container, layout);
 
   var isStable = false;
   var disposed = false;
   var sceneInitialized = false;
+
+  var svgRoot = createSvgRoot(container);
+  var sceneRoot = createSceneRoot(svgRoot);
+  var sceneTransform = createSceneTransform(sceneRoot);
+  var panSession = {};
+  var panNode = 0;
+
+  var linkLayer = addLayer('links', sceneRoot);
+  var nodeLayer = addLayer('nodes', sceneRoot);
+
+  var nodes = Object.create(null);
+  var links = Object.create(null);
+
+  var fromX = 0, fromY = 0;
+  var screenPinchX, screenPinchY, lastScale;
+  var cachedPos = { x: 0, y: 0 },
+      cachedFromPos = { x: 0, y: 0 },
+      cachedToPos = { x: 0, y: 0 };
+
+  var defaultUI = require('./lib/defaultUI.js');
+  var nodeBuilder = defaultUI.nodeBuilder,
+    nodePositionCallback = defaultUI.nodePositionCallback,
+    linkBuilder = defaultUI.linkBuilder,
+    linkPositionCallback = defaultUI.linkPositionCallback;
+
+  var currentTransform = {
+    tx : 0,
+    ty : 0,
+    scale: 1
+  };
 
   var api = {
     run: animationLoop,
     renderOneFrame: renderOneFrame,
     layout: layout,
 
-    dispose: function() {
-      layout.dispose();
-      api.off();
-      disposed = true;
-      listenToGraphEvents(false);
-      //listenToDomEvents(false);
-    },
+    dispose: dispose,
 
     node: setNodeBuilder,
 
     link: setLinkBuilder,
 
-    placeNode: function(newPlaceCallback) {
-      scene.placeNode(newPlaceCallback);
-      return api;
-    },
+    placeNode: placeNode,
 
-    placeLink: function(newPlaceLinkCallback) {
-      scene.placeLink(newPlaceCallback);
-      return api;
-    },
+    placeLink: placeLink,
+
+    svgRoot: svgRoot
   };
 
   require('ngraph.events')(api);
 
   return api;
 
+  function dispose() {
+    layout.dispose();
+    api.off();
+    disposed = true;
+    listenToGraphEvents(false);
+    releaseDOMEvents();
+  }
+
+  function placeLink(newPlaceLinkCallback) {
+    linkPositionCallback = newPlaceLinkCallback;
+    return api;
+  }
+
+  function placeNode(newPlaceCallback) {
+    nodePositionCallback = newPlaceCallback;
+    return api;
+  }
+
   function animationLoop() {
     if (disposed) return;
     requestAnimationFrame(animationLoop);
 
     if (!isStable) {
-      nowStable = layout.step();
+      isStable = layout.step();
       renderOneFrame();
     }
   }
@@ -82,26 +126,77 @@ function ngraphSvg(graph, settings) {
     if (disposed) return;
     if (!sceneInitialized) initializeScene();
 
-    scene.renderFrame();
+    for (var nodeId in nodes) {
+      var nodeInfo = nodes[nodeId];
+      cachedPos.x = nodeInfo.pos.x;
+      cachedPos.y = nodeInfo.pos.y;
+      nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
+    }
+
+    for (var linkId in links) {
+      var linkInfo = links[linkId];
+      cachedFromPos.x = linkInfo.pos.from.x;
+      cachedFromPos.y = linkInfo.pos.from.y;
+      cachedToPos.x = linkInfo.pos.to.x;
+      cachedToPos.y = linkInfo.pos.to.y;
+      linkPositionCallback(linkInfo.ui, cachedFromPos, cachedToPos, linkInfo.model);
+    }
   }
 
   function initializeScene() {
-    graph.forEachNode(scene.addNode);
-    graph.forEachLink(scene.addLink);
+    graph.forEachNode(addNode);
+    graph.forEachLink(addLink);
 
-    scene.moveTo(container.clientWidth / 2, container.clientHeight / 2);
+    moveTo(container.clientWidth / 2, container.clientHeight / 2);
 
     listenToGraphEvents(true);
     sceneInitialized = true;
   }
 
+  function addLink(link) {
+    var linkUI = linkBuilder(link);
+    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
+
+    links[link.id] = {
+      pos: layout.getLinkPosition(link.id),
+      model: link,
+      ui: linkUI
+    };
+
+    linkLayer.append(linkUI);
+  }
+
+  function addNode(node) {
+    var ui = nodeBuilder(node);
+    if (!ui) throw new Error('Node builder is supposed to return SVG object');
+
+    nodeLayer.append(ui);
+
+    var pos = layout.getNodePosition(node.id);
+    var nodeDescriptor = {
+      pos: pos,
+      model: node,
+      ui: ui
+    };
+
+    var recognizers = { recognizers: [
+      [hammer.Pan, { threshold: 1 }]
+    ] };
+    nodeDescriptor.events = hammer(ui, recognizers).on(MOVE_EVENTS, onNodePan(pos, node));
+    nodes[node.id] = nodeDescriptor;
+  }
+
   function setLinkBuilder(builderCallback) {
-    scene.setLinkBuilder(builderCallback);
+    if (typeof builderCallback !== "function") throw new Error('link builder callback is supposed to be a function');
+
+    linkBuilder = builderCallback; // todo: rebuild all nodes?
     return api;
   }
 
   function setNodeBuilder(builderCallback) {
-    scene.setNodeBuilder(builderCallback);
+    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
+
+    nodeBuilder = builderCallback; // todo: rebuild all nodes?
     return api;
   }
 
@@ -116,17 +211,17 @@ function ngraphSvg(graph, settings) {
       var change = changes[i];
       if (change.changeType === 'add') {
         if (change.node) {
-          scene.addNode(change.node);
+          addNode(change.node);
         }
         if (change.link) {
-          scene.addLink(change.link);
+          addLink(change.link);
         }
       } else if (change.changeType === 'remove') {
         if (change.node) {
-          scene.removeNode(change.node);
+          removeNode(change.node);
         }
         if (change.link) {
-          scene.removeLink(change.link);
+          removeLink(change.link);
         }
       }
     }
@@ -135,9 +230,172 @@ function ngraphSvg(graph, settings) {
   function resetStable() {
     isStable = false;
   }
+
+
+  function createSvgRoot(element) {
+    if (element instanceof SVGSVGElement) return element;
+    var svgRoot = svg("svg");
+    element.appendChild(svgRoot);
+
+    return svgRoot;
+  }
+
+  function createSceneRoot(svgRoot) {
+    var scene = svg('g').attr("buffered-rendering", "dynamic");
+    svgRoot.append(scene);
+
+    var sceneMoveRecognizer = { recognizers: [
+      [hammer.Pan, { threshold: 1 }],
+      [hammer.Pinch, { enable: true }]
+    ] };
+
+    // somehow ios does not fire events on svg. Use body instead:
+    hammer(container, sceneMoveRecognizer)
+      .on(MOVE_EVENTS, onScenePan)
+      .on('pinchstart pinchin pinchout', onScreenPinch);
+
+    var addWheelListener = require('wheel');
+    addWheelListener(svgRoot, onWheel);
+    return scene;
+  }
+
+
+  function onScenePan(e) {
+    if (e.target !== svgRoot || panNode > 0) return;
+    if (e.type === 'panmove') {
+      currentTransform.tx = fromX + e.deltaX;
+      currentTransform.ty = fromY + e.deltaY;
+      updateTransformMatrix();
+    } else if (e.type === 'panstart') {
+      fromX = currentTransform.tx;
+      fromY = currentTransform.ty;
+    }
+  }
+
+  function onWheel(e) {
+    var isZoomIn = e.deltaY < 0;
+    var direction = isZoomIn ? 1 : -1;
+    var factor = (1 + direction * 0.1);
+    var x = e.offsetX === undefined ? e.layerX : e.offsetX;
+    var y = e.offsetY === undefined ? e.layerY : e.offsetY;
+    zoomTo(x, y, factor);
+    e.preventDefault();
+  }
+
+  function zoomTo(x, y, factor) {
+    currentTransform.tx = x - factor * (x - currentTransform.tx);
+    currentTransform.ty = y - factor * (y - currentTransform.ty);
+    currentTransform.scale *= factor;
+    updateTransformMatrix();
+  }
+
+
+  function addLayer(name, parent) {
+    var layer = svg('g').attr('id', name);
+    parent.append(layer);
+    return layer;
+  }
+
+
+  function getModelPosition(pos) {
+    return {
+      x: (pos.x - currentTransform.tx)/currentTransform.scale,
+      y: (pos.y - currentTransform.ty)/currentTransform.scale,
+    };
+  }
+  function createSceneTransform(scene) {
+    var transform = svgRoot.createSVGTransform();
+    scene.transform.baseVal.appendItem(transform);
+
+    return transform;
+  }
+
+  function moveTo(x, y) {
+    currentTransform.tx = x;
+    currentTransform.ty = y;
+    updateTransformMatrix();
+  }
+
+  function updateTransformMatrix() {
+    sceneTransform.matrix.e = currentTransform.tx;
+    sceneTransform.matrix.f = currentTransform.ty;
+    sceneTransform.matrix.a = sceneTransform.matrix.d = currentTransform.scale;
+  }
+
+  function onNodePan(pos, model) {
+    return function onNodePan(e) {
+      var clickPosition = getModelPosition(e.center);
+      var status;
+      resetStable();
+
+      if (e.type === 'panmove') {
+        status = panSession[model.id];
+        layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
+      } else if (e.type === 'panstart') {
+        panSession[model.id] = {
+          isPinned: layout.isNodePinned(model),
+          dx: clickPosition.x - pos.x,
+          dy: clickPosition.y - pos.y
+        };
+        layout.pinNode(model, true);
+        panNode += 1;
+      } else if (e.type === 'panend') {
+        status = panSession[model.id];
+        if (status) layout.pinNode(model, status.isPinned);
+
+        panNode -= 1;
+        if (panNode < 0) panNode = 0;
+      }
+    };
+  }
+
+  function releaseDOMEvents() {
+    for (var key in nodes) {
+      var descriptor = nodes[key];
+      if (descriptor.events) descriptor.events.destroy();
+    }
+  }
+
+  function removeNode(node) {
+    var descriptor = nodes[node.id];
+    if (!descriptor) return;
+
+    descriptor.events.destroy();
+
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
+
+    delete nodes[node.id];
+  }
+
+  function removeLink(link) {
+    var descriptor = links[link.id];
+    if (!descriptor) return;
+
+    var parent = descriptor.ui.parentNode;
+    if (parent) parent.removeChild(descriptor.ui);
+
+    delete links[link.id];
+  }
+
+
+  function onScreenPinch(e) {
+    if (e.target !== svgRoot) return;
+
+    if (e.type === 'pinchstart') {
+      screenPinchX = e.center.x;
+      screenPinchY = e.center.y;
+      lastScale = e.scale;
+    } else {
+      var direction = lastScale > e.scale ? -1 : 1;
+      lastScale = e.scale;
+      var factor = (1 + direction * 0.04);
+      zoomTo(screenPinchX, screenPinchY, factor);
+    }
+  }
 }
 
-},{"./lib/defaultLayout.js":3,"./lib/scene":5,"ngraph.events":7}],3:[function(require,module,exports){
+},{"./lib/defaultLayout.js":3,"./lib/defaultUI.js":4,"hammerjs":5,"ngraph.events":6,"simplesvg":26,"wheel":31}],3:[function(require,module,exports){
 var merge = require('ngraph.merge');
 
 module.exports = getDefaultLayout;
@@ -161,7 +419,7 @@ function getDefaultLayout(graph, settings) {
   return createLayout(graph, physics(settings.physics));
 }
 
-},{"ngraph.forcelayout":8,"ngraph.merge":25,"ngraph.physics.simulator":26}],4:[function(require,module,exports){
+},{"ngraph.forcelayout":7,"ngraph.merge":11,"ngraph.physics.simulator":12}],4:[function(require,module,exports){
 var svg = require('simplesvg');
 
 exports.nodeBuilder = nodeBuilder;
@@ -191,282 +449,12 @@ function linkPositionCallback(linkUI, fromPos, toPos) {
     .attr("y2", toPos.y);
 }
 
-},{"simplesvg":40}],5:[function(require,module,exports){
-var svg = require('simplesvg');
-var hammer = require('hammerjs');
-
-module.exports = scene;
-
-var MOVE_EVENTS = 'panstart panmove panend';
-
-function scene(container, layout) {
-  var svgRoot = createSvgRoot(container);
-  var sceneRoot = createSceneRoot(svgRoot);
-  var sceneTransform = createSceneTransform(sceneRoot);
-  var panSession = {};
-  var panNode = 0;
-
-  var linkLayer = addLayer('links', sceneRoot);
-  var nodeLayer = addLayer('nodes', sceneRoot);
-
-  var nodes = Object.create(null);
-  var links = Object.create(null);
-
-  var fromX = 0, fromY = 0;
-  var screenPinchX, screenPinchY, lastScale;
-  var cachedPos = { x: 0, y: 0 },
-      cachedFromPos = { x: 0, y: 0 },
-      cachedToPos = { x: 0, y: 0 };
-
-  var defaultUI = require('./defaultUI.js');
-  var nodeBuilder = defaultUI.nodeBuilder,
-    nodePositionCallback = defaultUI.nodePositionCallback,
-    linkBuilder = defaultUI.linkBuilder,
-    linkPositionCallback = defaultUI.linkPositionCallback;
-
-  var currentTransform = {
-    tx : 0,
-    ty : 0,
-    scale: 1
-  };
-
-  var api = {
-    renderFrame: renderFrame,
-
-    addNode: addNode,
-    removeNode: removeNode,
-    addLink: addLink,
-    removeLink: removeLink,
-
-    moveTo: moveTo,
-    zoomTo: zoomTo,
-
-    setNodeBuilder: setNodeBuilder,
-    setLinkBuilder: setLinkBuilder,
-    placeNode: function(newPlaceCallback) { nodePositionCallback = newPlaceCallback; },
-    placeLink: function(newPlaceLinkCallback) { linkPositionCallback = newPlaceLinkCallback; },
-
-    dispose: dispose
-  };
-
-  return api;
-
-  function renderFrame() {
-    for (var nodeId in nodes) {
-      var nodeInfo = nodes[nodeId];
-      cachedPos.x = nodeInfo.pos.x;
-      cachedPos.y = nodeInfo.pos.y;
-      nodePositionCallback(nodeInfo.ui, cachedPos, nodeInfo.model);
-    }
-
-    for (var linkId in links) {
-      var linkInfo = links[linkId];
-      cachedFromPos.x = linkInfo.pos.from.x;
-      cachedFromPos.y = linkInfo.pos.from.y;
-      cachedToPos.x = linkInfo.pos.to.x;
-      cachedToPos.y = linkInfo.pos.to.y;
-      linkPositionCallback(linkInfo.ui, cachedToPos, cachedFromPos, linkInfo.model);
-    }
-  }
-
-  function moveTo(x, y) {
-    currentTransform.tx = x;
-    currentTransform.ty = y;
-    updateTransformMatrix();
-  }
-
-  function createSceneTransform(scene) {
-    var transform = svgRoot.createSVGTransform();
-    scene.transform.baseVal.appendItem(transform);
-
-    return transform;
-  }
-
-  function updateTransformMatrix() {
-    sceneTransform.matrix.e = currentTransform.tx;
-    sceneTransform.matrix.f = currentTransform.ty;
-    sceneTransform.matrix.a = sceneTransform.matrix.d = currentTransform.scale;
-  }
-
-  function setNodeBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('node builder callback is supposed to be a function');
-
-    nodeBuilder = builderCallback; // todo: rebuild all nodes?
-  }
-
-  function setLinkBuilder(builderCallback) {
-    if (typeof builderCallback !== "function") throw new Error('link builder callback is supposed to be a function');
-
-    linkBuilder = builderCallback; // todo: rebuild all nodes?
-  }
-
-  function addNode(node) {
-    var ui = nodeBuilder(node);
-    if (!ui) throw new Error('Node builder is supposed to return SVG object');
-
-    nodeLayer.append(ui);
-
-    var pos = layout.getNodePosition(node.id);
-    var nodeDescriptor = {
-      pos: pos,
-      model: node,
-      ui: ui
-    };
-
-    var recognizers = { recognizers:[ [hammer.Pan, { threshold: 1 }]] };
-    nodeDescriptor.events = hammer(ui, recognizers).on(MOVE_EVENTS, onNodePan(pos, node));
-    nodes[node.id] = nodeDescriptor;
-
-  }
-
-  function onNodePan(pos, model) {
-    return function onNodePan(e) {
-      var clickPosition = getModelPosition(e.center);
-
-      if (e.type === 'panmove') {
-        var status = panSession[model.id];
-        layout.setNodePosition(model.id, clickPosition.x - status.dx , clickPosition.y - status.dy);
-      } else if (e.type === 'panstart') {
-        panSession[model.id] = {
-          isPinned: layout.isNodePinned(model),
-          dx: clickPosition.x - pos.x,
-          dy: clickPosition.y - pos.y
-        };
-        layout.pinNode(model, true);
-        panNode += 1;
-      } else if (e.type === 'panend') {
-        layout.pinNode(model, panSession[model.id].isPinned);
-        panNode -= 1;
-      }
-    };
-  }
-
-  function removeNode(node) {
-    var descriptor = nodes[node.id];
-    if (!descriptor) return;
-
-    descriptor.events.off(MOVE_EVENTS);
-
-    var parent = descriptor.ui.parentNode;
-    if (parent) parent.removeChild(descriptor.ui);
-
-    delete nodes[node.id];
-  }
-
-
-  function addLink(link) {
-    var linkUI = linkBuilder(link);
-    if (!linkUI) throw new Error('Link builder is supposed to return SVG object');
-
-    links[link.id] = {
-      pos: layout.getLinkPosition(link.id),
-      model: link,
-      ui: linkUI
-    };
-
-    linkLayer.append(linkUI);
-  }
-
-  function removeLink(link) {
-    var descriptor = links[link.id];
-    if (!descriptor) return;
-
-    var parent = descriptor.ui.parentNode;
-    if (parent) parent.removeChild(descriptor.ui);
-
-    delete links[link.id];
-  }
-
-  function createSvgRoot(element) {
-    if (element instanceof SVGSVGElement) return element;
-    var svgRoot = svg("svg");
-    element.appendChild(svgRoot);
-
-    return svgRoot;
-  }
-
-  function createSceneRoot(svgRoot) {
-    var scene = svg('g').attr("buffered-rendering", "dynamic");
-    svgRoot.append(scene);
-
-    var sceneMoveRecognizer = { recognizers: [
-      [hammer.Pan, { threshold: 1 }],
-      [hammer.Pinch, { enable: true }]
-    ] };
-
-    // somehow ios does not fire events on svg. Use body instead:
-    hammer(document.body, sceneMoveRecognizer)
-      .on(MOVE_EVENTS, onScenePan)
-      .on('pinchstart pinchin pinchout', onScreenPinch);
-
-    var addWheelListener = require('wheel');
-    addWheelListener(svgRoot, onWheel);
-    return scene;
-  }
-
-  function onScreenPinch(e) {
-    if (e.target !== svgRoot) return;
-
-    if (e.type === 'pinchstart') {
-      screenPinchX = e.center.x;
-      screenPinchY = e.center.y;
-      lastScale = e.scale;
-    } else {
-      var direction = lastScale > e.scale ? -1 : 1;
-      lastScale = e.scale;
-      var factor = (1 + direction * 0.04);
-      zoomTo(screenPinchX, screenPinchY, factor);
-    }
-  }
-
-  function onWheel(e) {
-    var isZoomIn = e.deltaY < 0;
-    var direction = isZoomIn ? 1 : -1;
-    var factor = (1 + direction * 0.1);
-    zoomTo(e.clientX, e.clientY, factor);
-  }
-
-  function zoomTo(x, y, factor) {
-    currentTransform.tx = x - factor * (x - currentTransform.tx);
-    currentTransform.ty = y - factor * (y - currentTransform.ty);
-    currentTransform.scale *= factor;
-    updateTransformMatrix();
-  }
-
-  function onScenePan(e) {
-    if (e.target !== svgRoot || panNode > 0) return;
-    if (e.type === 'panmove') {
-      currentTransform.tx = fromX + e.deltaX;
-      currentTransform.ty = fromY + e.deltaY;
-      updateTransformMatrix();
-    } else if (e.type === 'panstart') {
-      fromX = currentTransform.tx;
-      fromY = currentTransform.ty;
-    }
-  }
-
-  function addLayer(name, parent) {
-    var layer = svg('g').attr('id', name);
-    parent.append(layer);
-    return layer;
-  }
-
-
-  function getModelPosition(pos) {
-    return {
-      x: (pos.x - currentTransform.tx)/currentTransform.scale,
-      y: (pos.y - currentTransform.ty)/currentTransform.scale,
-    };
-  }
-
-  function dispose() {
-    // todo: implement me:
-    // 1. scene hammer
-    // 2. scene mouse wheel
-  }
-}
-
-},{"./defaultUI.js":4,"hammerjs":6,"simplesvg":40,"wheel":42}],6:[function(require,module,exports){
+},{"simplesvg":26}],5:[function(require,module,exports){
+/*! Hammer.JS - v2.0.4 - 2014-09-28
+ * http://hammerjs.github.io/
+ *
+ * Copyright (c) 2014 Jorik Tangelder;
+ * Licensed under the MIT license */
 (function(window, document, exportName, undefined) {
   'use strict';
 
@@ -514,7 +502,7 @@ function invokeArrayArg(arg, fn, context) {
  * @param {Object} context
  */
 function each(obj, iterator, context) {
-    var i, len;
+    var i;
 
     if (!obj) {
         return;
@@ -523,8 +511,10 @@ function each(obj, iterator, context) {
     if (obj.forEach) {
         obj.forEach(iterator, context);
     } else if (obj.length !== undefined) {
-        for (i = 0, len = obj.length; i < len; i++) {
+        i = 0;
+        while (i < obj.length) {
             iterator.call(context, obj[i], i, obj);
+            i++;
         }
     } else {
         for (i in obj) {
@@ -543,10 +533,12 @@ function each(obj, iterator, context) {
  */
 function extend(dest, src, merge) {
     var keys = Object.keys(src);
-    for (var i = 0, len = keys.length; i < len; i++) {
+    var i = 0;
+    while (i < keys.length) {
         if (!merge || (merge && dest[keys[i]] === undefined)) {
             dest[keys[i]] = src[keys[i]];
         }
+        i++;
     }
     return dest;
 }
@@ -619,25 +611,25 @@ function ifUndefined(val1, val2) {
 
 /**
  * addEventListener with multiple events at once
- * @param {HTMLElement} element
+ * @param {EventTarget} target
  * @param {String} types
  * @param {Function} handler
  */
-function addEventListeners(element, types, handler) {
+function addEventListeners(target, types, handler) {
     each(splitStr(types), function(type) {
-        element.addEventListener(type, handler, false);
+        target.addEventListener(type, handler, false);
     });
 }
 
 /**
  * removeEventListener with multiple events at once
- * @param {HTMLElement} element
+ * @param {EventTarget} target
  * @param {String} types
  * @param {Function} handler
  */
-function removeEventListeners(element, types, handler) {
+function removeEventListeners(target, types, handler) {
     each(splitStr(types), function(type) {
-        element.removeEventListener(type, handler, false);
+        target.removeEventListener(type, handler, false);
     });
 }
 
@@ -688,10 +680,12 @@ function inArray(src, find, findByKey) {
     if (src.indexOf && !findByKey) {
         return src.indexOf(find);
     } else {
-        for (var i = 0, len = src.length; i < len; i++) {
+        var i = 0;
+        while (i < src.length) {
             if ((findByKey && src[i][findByKey] == find) || (!findByKey && src[i] === find)) {
                 return i;
             }
+            i++;
         }
         return -1;
     }
@@ -716,12 +710,15 @@ function toArray(obj) {
 function uniqueArray(src, key, sort) {
     var results = [];
     var values = [];
-    for (var i = 0, len = src.length; i < len; i++) {
+    var i = 0;
+
+    while (i < src.length) {
         var val = key ? src[i][key] : src[i];
         if (inArray(values, val) < 0) {
             results.push(src[i]);
         }
         values[i] = val;
+        i++;
     }
 
     if (sort) {
@@ -747,13 +744,15 @@ function prefixed(obj, property) {
     var prefix, prop;
     var camelProp = property[0].toUpperCase() + property.slice(1);
 
-    for (var i = 0, len = VENDOR_PREFIXES.length; i < len; i++) {
+    var i = 0;
+    while (i < VENDOR_PREFIXES.length) {
         prefix = VENDOR_PREFIXES[i];
         prop = (prefix) ? prefix + camelProp : property;
 
         if (prop in obj) {
             return prop;
         }
+        i++;
     }
     return undefined;
 }
@@ -765,6 +764,16 @@ function prefixed(obj, property) {
 var _uniqueId = 1;
 function uniqueId() {
     return _uniqueId++;
+}
+
+/**
+ * get the window object of an element
+ * @param {HTMLElement} element
+ * @returns {DocumentView|Window}
+ */
+function getWindowForElement(element) {
+    var doc = element.ownerDocument;
+    return (doc.defaultView || doc.parentWindow);
 }
 
 var MOBILE_REGEX = /mobile|tablet|ip(ad|hone|od)|android/i;
@@ -820,9 +829,8 @@ function Input(manager, callback) {
         }
     };
 
-    this.evEl && addEventListeners(this.element, this.evEl, this.domHandler);
-    this.evTarget && addEventListeners(this.target, this.evTarget, this.domHandler);
-    this.evWin && addEventListeners(window, this.evWin, this.domHandler);
+    this.init();
+
 }
 
 Input.prototype = {
@@ -833,23 +841,37 @@ Input.prototype = {
     handler: function() { },
 
     /**
+     * bind the events
+     */
+    init: function() {
+        this.evEl && addEventListeners(this.element, this.evEl, this.domHandler);
+        this.evTarget && addEventListeners(this.target, this.evTarget, this.domHandler);
+        this.evWin && addEventListeners(getWindowForElement(this.element), this.evWin, this.domHandler);
+    },
+
+    /**
      * unbind the events
      */
     destroy: function() {
         this.evEl && removeEventListeners(this.element, this.evEl, this.domHandler);
         this.evTarget && removeEventListeners(this.target, this.evTarget, this.domHandler);
-        this.evWin && removeEventListeners(window, this.evWin, this.domHandler);
+        this.evWin && removeEventListeners(getWindowForElement(this.element), this.evWin, this.domHandler);
     }
 };
 
 /**
  * create new input type manager
+ * called by the Manager constructor
  * @param {Hammer} manager
  * @returns {Input}
  */
 function createInputInstance(manager) {
     var Type;
-    if (SUPPORT_POINTER_EVENTS) {
+    var inputClass = manager.options.inputClass;
+
+    if (inputClass) {
+        Type = inputClass;
+    } else if (SUPPORT_POINTER_EVENTS) {
         Type = PointerEventInput;
     } else if (SUPPORT_ONLY_TOUCH) {
         Type = TouchInput;
@@ -1009,11 +1031,13 @@ function simpleCloneInputData(input) {
     // make a simple copy of the pointers because we will get a reference if we don't
     // we only need clientXY for the calculations
     var pointers = [];
-    for (var i = 0; i < input.pointers.length; i++) {
+    var i = 0;
+    while (i < input.pointers.length) {
         pointers[i] = {
             clientX: round(input.pointers[i].clientX),
             clientY: round(input.pointers[i].clientY)
         };
+        i++;
     }
 
     return {
@@ -1041,10 +1065,11 @@ function getCenter(pointers) {
         };
     }
 
-    var x = 0, y = 0;
-    for (var i = 0; i < pointersLength; i++) {
+    var x = 0, y = 0, i = 0;
+    while (i < pointersLength) {
         x += pointers[i].clientX;
         y += pointers[i].clientY;
+        i++;
     }
 
     return {
@@ -1194,7 +1219,7 @@ inherit(MouseInput, Input, {
             pointerType: INPUT_TYPE_MOUSE,
             srcEvent: ev
         });
-    },
+    }
 });
 
 var POINTER_INPUT_MAP = {
@@ -1251,16 +1276,20 @@ inherit(PointerEventInput, Input, {
 
         var isTouch = (pointerType == INPUT_TYPE_TOUCH);
 
+        // get index of the event in the store
+        var storeIndex = inArray(store, ev.pointerId, 'pointerId');
+
         // start and mouse must be down
         if (eventType & INPUT_START && (ev.button === 0 || isTouch)) {
-            store.push(ev);
+            if (storeIndex < 0) {
+                store.push(ev);
+                storeIndex = store.length - 1;
+            }
         } else if (eventType & (INPUT_END | INPUT_CANCEL)) {
             removePointer = true;
         }
 
-        // get index of the event in the store
         // it not found, so the pointer hasn't been down (so it's probably a hover)
-        var storeIndex = inArray(store, ev.pointerId, 'pointerId');
         if (storeIndex < 0) {
             return;
         }
@@ -1282,6 +1311,75 @@ inherit(PointerEventInput, Input, {
     }
 });
 
+var SINGLE_TOUCH_INPUT_MAP = {
+    touchstart: INPUT_START,
+    touchmove: INPUT_MOVE,
+    touchend: INPUT_END,
+    touchcancel: INPUT_CANCEL
+};
+
+var SINGLE_TOUCH_TARGET_EVENTS = 'touchstart';
+var SINGLE_TOUCH_WINDOW_EVENTS = 'touchstart touchmove touchend touchcancel';
+
+/**
+ * Touch events input
+ * @constructor
+ * @extends Input
+ */
+function SingleTouchInput() {
+    this.evTarget = SINGLE_TOUCH_TARGET_EVENTS;
+    this.evWin = SINGLE_TOUCH_WINDOW_EVENTS;
+    this.started = false;
+
+    Input.apply(this, arguments);
+}
+
+inherit(SingleTouchInput, Input, {
+    handler: function TEhandler(ev) {
+        var type = SINGLE_TOUCH_INPUT_MAP[ev.type];
+
+        // should we handle the touch events?
+        if (type === INPUT_START) {
+            this.started = true;
+        }
+
+        if (!this.started) {
+            return;
+        }
+
+        var touches = normalizeSingleTouches.call(this, ev, type);
+
+        // when done, reset the started state
+        if (type & (INPUT_END | INPUT_CANCEL) && touches[0].length - touches[1].length === 0) {
+            this.started = false;
+        }
+
+        this.callback(this.manager, type, {
+            pointers: touches[0],
+            changedPointers: touches[1],
+            pointerType: INPUT_TYPE_TOUCH,
+            srcEvent: ev
+        });
+    }
+});
+
+/**
+ * @this {TouchInput}
+ * @param {Object} ev
+ * @param {Number} type flag
+ * @returns {undefined|Array} [all, changed]
+ */
+function normalizeSingleTouches(ev, type) {
+    var all = toArray(ev.touches);
+    var changed = toArray(ev.changedTouches);
+
+    if (type & (INPUT_END | INPUT_CANCEL)) {
+        all = uniqueArray(all.concat(changed), 'identifier', true);
+    }
+
+    return [all, changed];
+}
+
 var TOUCH_INPUT_MAP = {
     touchstart: INPUT_START,
     touchmove: INPUT_MOVE,
@@ -1292,7 +1390,7 @@ var TOUCH_INPUT_MAP = {
 var TOUCH_TARGET_EVENTS = 'touchstart touchmove touchend touchcancel';
 
 /**
- * Touch events input
+ * Multi-user touch events input
  * @constructor
  * @extends Input
  */
@@ -1304,11 +1402,7 @@ function TouchInput() {
 }
 
 inherit(TouchInput, Input, {
-    /**
-     * handle touch events
-     * @param {Object} ev
-     */
-    handler: function TEhandler(ev) {
+    handler: function MTEhandler(ev) {
         var type = TOUCH_INPUT_MAP[ev.type];
         var touches = getTouches.call(this, ev, type);
         if (!touches) {
@@ -1340,20 +1434,29 @@ function getTouches(ev, type) {
         return [allTouches, allTouches];
     }
 
-    var i, len;
-    var targetTouches = toArray(ev.targetTouches);
-    var changedTouches = toArray(ev.changedTouches);
-    var changedTargetTouches = [];
+    var i,
+        targetTouches,
+        changedTouches = toArray(ev.changedTouches),
+        changedTargetTouches = [],
+        target = this.target;
+
+    // get target touches from touches
+    targetTouches = allTouches.filter(function(touch) {
+        return hasParent(touch.target, target);
+    });
 
     // collect touches
     if (type === INPUT_START) {
-        for (i = 0, len = targetTouches.length; i < len; i++) {
+        i = 0;
+        while (i < targetTouches.length) {
             targetIds[targetTouches[i].identifier] = true;
+            i++;
         }
     }
 
     // filter changed touches to only contain touches that exist in the collected target ids
-    for (i = 0, len = changedTouches.length; i < len; i++) {
+    i = 0;
+    while (i < changedTouches.length) {
         if (targetIds[changedTouches[i].identifier]) {
             changedTargetTouches.push(changedTouches[i]);
         }
@@ -1362,6 +1465,7 @@ function getTouches(ev, type) {
         if (type & (INPUT_END | INPUT_CANCEL)) {
             delete targetIds[changedTouches[i].identifier];
         }
+        i++;
     }
 
     if (!changedTargetTouches.length) {
@@ -1513,7 +1617,7 @@ TouchAction.prototype = {
         var hasPanY = inStr(actions, TOUCH_ACTION_PAN_Y);
         var hasPanX = inStr(actions, TOUCH_ACTION_PAN_X);
 
-        if (hasNone || (hasPanY && hasPanX) ||
+        if (hasNone ||
             (hasPanY && direction & DIRECTION_HORIZONTAL) ||
             (hasPanX && direction & DIRECTION_VERTICAL)) {
             return this.preventSrc(srcEvent);
@@ -1771,10 +1875,12 @@ Recognizer.prototype = {
      * @returns {boolean}
      */
     canEmit: function() {
-        for (var i = 0; i < this.requireFail.length; i++) {
+        var i = 0;
+        while (i < this.requireFail.length) {
             if (!(this.requireFail[i].state & (STATE_FAILED | STATE_POSSIBLE))) {
                 return false;
             }
+            i++;
         }
         return true;
     },
@@ -1971,11 +2077,6 @@ inherit(PanRecognizer, AttrRecognizer, {
 
     getTouchAction: function() {
         var direction = this.options.direction;
-
-        if (direction === DIRECTION_ALL) {
-            return [TOUCH_ACTION_NONE];
-        }
-
         var actions = [];
         if (direction & DIRECTION_HORIZONTAL) {
             actions.push(TOUCH_ACTION_PAN_Y);
@@ -2210,6 +2311,7 @@ inherit(SwipeRecognizer, AttrRecognizer, {
 
         return this._super.attrTest.call(this, input) &&
             direction & input.direction &&
+            input.distance > this.options.threshold &&
             abs(velocity) > this.options.velocity && input.eventType & INPUT_END;
     },
 
@@ -2353,7 +2455,7 @@ function Hammer(element, options) {
 /**
  * @const {string}
  */
-Hammer.VERSION = '2.0.2';
+Hammer.VERSION = '2.0.4';
 
 /**
  * default settings
@@ -2377,7 +2479,13 @@ Hammer.defaults = {
     touchAction: TOUCH_ACTION_COMPUTE,
 
     /**
-     * EXPERIMENTAL FEATURE
+     * @type {Boolean}
+     * @default true
+     */
+    enable: true,
+
+    /**
+     * EXPERIMENTAL FEATURE -- can be removed/changed
      * Change the parent input target element.
      * If Null, then it is being set the to main element.
      * @type {Null|EventTarget}
@@ -2386,10 +2494,11 @@ Hammer.defaults = {
     inputTarget: null,
 
     /**
-     * @type {Boolean}
-     * @default true
+     * force an input class
+     * @type {Null|Function}
+     * @default null
      */
-    enable: true,
+    inputClass: null,
 
     /**
      * Default recognizer setup when calling `Hammer()`
@@ -2488,7 +2597,7 @@ function Manager(element, options) {
     each(options.recognizers, function(item) {
         var recognizer = this.add(new (item[0])(item[1]));
         item[2] && recognizer.recognizeWith(item[2]);
-        item[3] && recognizer.requireFailure(item[2]);
+        item[3] && recognizer.requireFailure(item[3]);
     }, this);
 }
 
@@ -2500,6 +2609,17 @@ Manager.prototype = {
      */
     set: function(options) {
         extend(this.options, options);
+
+        // Options that need a little more setup
+        if (options.touchAction) {
+            this.touchAction.update();
+        }
+        if (options.inputTarget) {
+            // Clean up existing event listeners and reinitialize
+            this.input.destroy();
+            this.input.target = options.inputTarget;
+            this.input.init();
+        }
         return this;
     },
 
@@ -2542,7 +2662,8 @@ Manager.prototype = {
             curRecognizer = session.curRecognizer = null;
         }
 
-        for (var i = 0, len = recognizers.length; i < len; i++) {
+        var i = 0;
+        while (i < recognizers.length) {
             recognizer = recognizers[i];
 
             // find out if we are allowed try to recognize the input for this one.
@@ -2564,6 +2685,7 @@ Manager.prototype = {
             if (!curRecognizer && recognizer.state & (STATE_BEGAN | STATE_CHANGED | STATE_ENDED)) {
                 curRecognizer = session.curRecognizer = recognizer;
             }
+            i++;
         }
     },
 
@@ -2683,8 +2805,10 @@ Manager.prototype = {
             data.srcEvent.preventDefault();
         };
 
-        for (var i = 0, len = handlers.length; i < len; i++) {
+        var i = 0;
+        while (i < handlers.length) {
             handlers[i](data);
+            i++;
         }
     },
 
@@ -2753,6 +2877,12 @@ extend(Hammer, {
     Input: Input,
     TouchAction: TouchAction,
 
+    TouchInput: TouchInput,
+    MouseInput: MouseInput,
+    PointerEventInput: PointerEventInput,
+    TouchMouseInput: TouchMouseInput,
+    SingleTouchInput: SingleTouchInput,
+
     Recognizer: Recognizer,
     AttrRecognizer: AttrRecognizer,
     Tap: TapRecognizer,
@@ -2784,7 +2914,7 @@ if (typeof define == TYPE_FUNCTION && define.amd) {
 
 })(window, document, 'Hammer');
 
-},{}],7:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 module.exports = function(subject) {
   validateSubject(subject);
 
@@ -2874,15 +3004,18 @@ function validateSubject(subject) {
   }
 }
 
-},{}],8:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 module.exports = createLayout;
+module.exports.simulator = require('ngraph.physics.simulator');
+
+var guard = require('varta');
 
 // Maximum movement of the system at which system should be considered as stable
-var MAX_MOVEMENT = 0.001; 
+var MAX_MOVEMENT = 0.001;
 
 /**
  * Creates force based layout for a given graph.
- * @param {ngraph.graph} graph which needs to be layed out
+ * @param {ngraph.graph} graph which needs to be laid out
  * @param {ngraph.physics.simulator=} physicsSimulator if you need custom settings
  * for physics simulator you can pass your own simulator here. If it's not passed
  * a default one will be created
@@ -2896,6 +3029,8 @@ function createLayout(graph, physicsSimulator) {
       physics = require('ngraph.physics.primitives');
 
   physicsSimulator = physicsSimulator || simulator();
+
+  guard(physicsSimulator, 'physicsSimulator').has('step', 'getBestNewBodyPosition', 'addBodyAt');
 
   var nodeBodies = typeof Object.create === 'function' ? Object.create(null) : {},
       springs = {};
@@ -2925,8 +3060,7 @@ function createLayout(graph, physicsSimulator) {
      */
     setNodePosition: function (nodeId, x, y) {
       var body = getInitializedBody(nodeId);
-      body.prevPos.x = body.pos.x = x;
-      body.prevPos.y = body.pos.y = y;
+      body.setPosition.apply(body, Array.prototype.slice.call(arguments, 1));
     },
 
     /**
@@ -3132,7 +3266,7 @@ function createLayout(graph, physicsSimulator) {
   }
 }
 
-},{"ngraph.physics.primitives":9,"ngraph.physics.simulator":10}],9:[function(require,module,exports){
+},{"ngraph.physics.primitives":8,"ngraph.physics.simulator":12,"varta":9}],8:[function(require,module,exports){
 module.exports = {
   Body: Body,
   Vector2d: Vector2d,
@@ -3147,6 +3281,11 @@ function Body(x, y) {
   this.velocity = new Vector2d();
   this.mass = 1;
 }
+
+Body.prototype.setPosition = function (x, y) {
+  this.prevPos.x = this.pos.x = x;
+  this.prevPos.y = this.pos.y = y;
+};
 
 function Vector2d(x, y) {
   if (x && typeof x !== 'number') {
@@ -3171,6 +3310,12 @@ function Body3d(x, y, z) {
   this.mass = 1;
 }
 
+Body3d.prototype.setPosition = function (x, y, z) {
+  this.prevPos.x = this.pos.x = x;
+  this.prevPos.y = this.pos.y = y;
+  this.prevPos.z = this.pos.z = z;
+};
+
 function Vector3d(x, y, z) {
   if (x && typeof x !== 'number') {
     // could be another vector
@@ -3188,7 +3333,587 @@ Vector3d.prototype.reset = function () {
   this.x = this.y = this.z = 0;
 };
 
+},{}],9:[function(require,module,exports){
+module.exports = varta;
+
+module.exports.has = delayedVerify;
+
+function varta(suspect, name) {
+  name = name || 'Argument';
+
+  return {
+    has: has
+  };
+
+  function has() {
+    return internalVerify(suspect, name, arguments);
+  }
+}
+
+function delayedVerify() {
+  var expectations = arguments;
+  return verify;
+
+  function verify(suspect, name) {
+    return internalVerify(suspect, name, expectations);
+  }
+}
+
+function internalVerify(suspect, name, expectations) {
+  if (suspect === undefined) {
+    throw new Error(name + ' is not defined');
+  }
+
+  for (var i = 0; i < expectations.length; ++i) {
+    if (suspect[expectations[i]] === undefined) {
+      throw new Error(name + ' is expected to have a property `' + expectations[i] + '`');
+    }
+  }
+
+  return true;
+}
+
 },{}],10:[function(require,module,exports){
+/**
+ * @fileOverview Contains definition of the core graph object.
+ */
+
+/**
+ * @example
+ *  var graph = require('ngraph.graph')();
+ *  graph.addNode(1);     // graph has one node.
+ *  graph.addLink(2, 3);  // now graph contains three nodes and one link.
+ *
+ */
+module.exports = createGraph;
+
+var eventify = require('ngraph.events');
+
+function createGraph() {
+  // Graph structure is maintained as dictionary of nodes
+  // and array of links. Each node has 'links' property which
+  // hold all links related to that node. And general links
+  // array is used to speed up all links enumeration. This is inefficient
+  // in terms of memory, but simplifies coding.
+
+  var nodes = typeof Object.create === 'function' ? Object.create(null) : {},
+    links = [],
+    // Hash of multi-edges. Used to track ids of edges between same nodes
+    multiEdges = {},
+    nodesCount = 0,
+    suspendEvents = 0,
+
+    forEachNode = createNodeIterator(),
+    linkConnectionSymbol = '👉 ',
+
+    // Our graph API provides means to listen to graph changes. Users can subscribe
+    // to be notified about changes in the graph by using `on` method. However
+    // in some cases they don't use it. To avoid unnecessary memory consumption
+    // we will not record graph changes until we have at least one subscriber.
+    // Code below supports this optimization.
+    //
+    // Accumulates all changes made during graph updates.
+    // Each change element contains:
+    //  changeType - one of the strings: 'add', 'remove' or 'update';
+    //  node - if change is related to node this property is set to changed graph's node;
+    //  link - if change is related to link this property is set to changed graph's link;
+    changes = [],
+    recordLinkChange = noop,
+    recordNodeChange = noop,
+    enterModification = noop,
+    exitModification = noop;
+
+  // this is our public API:
+  var graphPart = {
+    /**
+     * Adds node to the graph. If node with given id already exists in the graph
+     * its data is extended with whatever comes in 'data' argument.
+     *
+     * @param nodeId the node's identifier. A string or number is preferred.
+     *   note: Node id should not contain 'linkConnectionSymbol'. This will break link identifiers
+     * @param [data] additional data for the node being added. If node already
+     *   exists its data object is augmented with the new one.
+     *
+     * @return {node} The newly added node or node with given id if it already exists.
+     */
+    addNode: addNode,
+
+    /**
+     * Adds a link to the graph. The function always create a new
+     * link between two nodes. If one of the nodes does not exists
+     * a new node is created.
+     *
+     * @param fromId link start node id;
+     * @param toId link end node id;
+     * @param [data] additional data to be set on the new link;
+     *
+     * @return {link} The newly created link
+     */
+    addLink: addLink,
+
+    /**
+     * Removes link from the graph. If link does not exist does nothing.
+     *
+     * @param link - object returned by addLink() or getLinks() methods.
+     *
+     * @returns true if link was removed; false otherwise.
+     */
+    removeLink: removeLink,
+
+    /**
+     * Removes node with given id from the graph. If node does not exist in the graph
+     * does nothing.
+     *
+     * @param nodeId node's identifier passed to addNode() function.
+     *
+     * @returns true if node was removed; false otherwise.
+     */
+    removeNode: removeNode,
+
+    /**
+     * Gets node with given identifier. If node does not exist undefined value is returned.
+     *
+     * @param nodeId requested node identifier;
+     *
+     * @return {node} in with requested identifier or undefined if no such node exists.
+     */
+    getNode: getNode,
+
+    /**
+     * Gets number of nodes in this graph.
+     *
+     * @return number of nodes in the graph.
+     */
+    getNodesCount: function() {
+      return nodesCount;
+    },
+
+    /**
+     * Gets total number of links in the graph.
+     */
+    getLinksCount: function() {
+      return links.length;
+    },
+
+    /**
+     * Gets all links (inbound and outbound) from the node with given id.
+     * If node with given id is not found null is returned.
+     *
+     * @param nodeId requested node identifier.
+     *
+     * @return Array of links from and to requested node if such node exists;
+     *   otherwise null is returned.
+     */
+    getLinks: getLinks,
+
+    /**
+     * Invokes callback on each node of the graph.
+     *
+     * @param {Function(node)} callback Function to be invoked. The function
+     *   is passed one argument: visited node.
+     */
+    forEachNode: forEachNode,
+
+    /**
+     * Invokes callback on every linked (adjacent) node to the given one.
+     *
+     * @param nodeId Identifier of the requested node.
+     * @param {Function(node, link)} callback Function to be called on all linked nodes.
+     *   The function is passed two parameters: adjacent node and link object itself.
+     * @param oriented if true graph treated as oriented.
+     */
+    forEachLinkedNode: forEachLinkedNode,
+
+    /**
+     * Enumerates all links in the graph
+     *
+     * @param {Function(link)} callback Function to be called on all links in the graph.
+     *   The function is passed one parameter: graph's link object.
+     *
+     * Link object contains at least the following fields:
+     *  fromId - node id where link starts;
+     *  toId - node id where link ends,
+     *  data - additional data passed to graph.addLink() method.
+     */
+    forEachLink: forEachLink,
+
+    /**
+     * Suspend all notifications about graph changes until
+     * endUpdate is called.
+     */
+    beginUpdate: enterModification,
+
+    /**
+     * Resumes all notifications about graph changes and fires
+     * graph 'changed' event in case there are any pending changes.
+     */
+    endUpdate: exitModification,
+
+    /**
+     * Removes all nodes and links from the graph.
+     */
+    clear: clear,
+
+    /**
+     * Detects whether there is a link between two nodes.
+     * Operation complexity is O(n) where n - number of links of a node.
+     *
+     * @returns link if there is one. null otherwise.
+     */
+    hasLink: hasLink
+  };
+
+  // this will add `on()` and `fire()` methods.
+  eventify(graphPart);
+
+  monitorSubscribers();
+
+  return graphPart;
+
+  function monitorSubscribers() {
+    var realOn = graphPart.on;
+
+    // replace real `on` with our temporary on, which will trigger change
+    // modification monitoring:
+    graphPart.on = on;
+
+    function on() {
+      // now it's time to start tracking stuff:
+      enterModification = enterModificationReal;
+      exitModification = exitModificationReal;
+      recordLinkChange = recordLinkChangeReal;
+      recordNodeChange = recordNodeChangeReal;
+
+      // this will replace current `on` method with real pub/sub from `eventify`.
+      graphPart.on = realOn;
+      // delegate to real `on` handler:
+      return realOn.apply(graphPart, arguments);
+    }
+  }
+
+  function recordLinkChangeReal(link, changeType) {
+    changes.push({
+      link: link,
+      changeType: changeType
+    });
+  }
+
+  function recordNodeChangeReal(node, changeType) {
+    changes.push({
+      node: node,
+      changeType: changeType
+    });
+  }
+
+  function addNode(nodeId, data) {
+    if (nodeId === undefined) {
+      throw new Error('Invalid node identifier');
+    }
+
+    enterModification();
+
+    var node = getNode(nodeId);
+    if (!node) {
+      // TODO: Should I check for linkConnectionSymbol here?
+      node = new Node(nodeId);
+      nodesCount++;
+      recordNodeChange(node, 'add');
+    } else {
+      recordNodeChange(node, 'update');
+    }
+
+    node.data = data;
+
+    nodes[nodeId] = node;
+
+    exitModification();
+    return node;
+  }
+
+  function getNode(nodeId) {
+    return nodes[nodeId];
+  }
+
+  function removeNode(nodeId) {
+    var node = getNode(nodeId);
+    if (!node) {
+      return false;
+    }
+
+    enterModification();
+
+    while (node.links.length) {
+      var link = node.links[0];
+      removeLink(link);
+    }
+
+    delete nodes[nodeId];
+    nodesCount--;
+
+    recordNodeChange(node, 'remove');
+
+    exitModification();
+
+    return true;
+  }
+
+
+  function addLink(fromId, toId, data) {
+    enterModification();
+
+    var fromNode = getNode(fromId) || addNode(fromId);
+    var toNode = getNode(toId) || addNode(toId);
+
+    var linkId = fromId.toString() + linkConnectionSymbol + toId.toString();
+    var isMultiEdge = multiEdges.hasOwnProperty(linkId);
+    if (isMultiEdge || hasLink(fromId, toId)) {
+      if (!isMultiEdge) {
+        multiEdges[linkId] = 0;
+      }
+      linkId += '@' + (++multiEdges[linkId]);
+    }
+
+    var link = new Link(fromId, toId, data, linkId);
+
+    links.push(link);
+
+    // TODO: this is not cool. On large graphs potentially would consume more memory.
+    fromNode.links.push(link);
+    toNode.links.push(link);
+
+    recordLinkChange(link, 'add');
+
+    exitModification();
+
+    return link;
+  }
+
+  function getLinks(nodeId) {
+    var node = getNode(nodeId);
+    return node ? node.links : null;
+  }
+
+  function removeLink(link) {
+    if (!link) {
+      return false;
+    }
+    var idx = indexOfElementInArray(link, links);
+    if (idx < 0) {
+      return false;
+    }
+
+    enterModification();
+
+    links.splice(idx, 1);
+
+    var fromNode = getNode(link.fromId);
+    var toNode = getNode(link.toId);
+
+    if (fromNode) {
+      idx = indexOfElementInArray(link, fromNode.links);
+      if (idx >= 0) {
+        fromNode.links.splice(idx, 1);
+      }
+    }
+
+    if (toNode) {
+      idx = indexOfElementInArray(link, toNode.links);
+      if (idx >= 0) {
+        toNode.links.splice(idx, 1);
+      }
+    }
+
+    recordLinkChange(link, 'remove');
+
+    exitModification();
+
+    return true;
+  }
+
+  function hasLink(fromNodeId, toNodeId) {
+    // TODO: Use adjacency matrix to speed up this operation.
+    var node = getNode(fromNodeId),
+      i;
+    if (!node) {
+      return null;
+    }
+
+    for (i = 0; i < node.links.length; ++i) {
+      var link = node.links[i];
+      if (link.fromId === fromNodeId && link.toId === toNodeId) {
+        return link;
+      }
+    }
+
+    return null; // no link.
+  }
+
+  function clear() {
+    enterModification();
+    forEachNode(function(node) {
+      removeNode(node.id);
+    });
+    exitModification();
+  }
+
+  function forEachLink(callback) {
+    var i, length;
+    if (typeof callback === 'function') {
+      for (i = 0, length = links.length; i < length; ++i) {
+        callback(links[i]);
+      }
+    }
+  }
+
+  function forEachLinkedNode(nodeId, callback, oriented) {
+    var node = getNode(nodeId),
+      i,
+      link,
+      linkedNodeId;
+
+    if (node && node.links && typeof callback === 'function') {
+      // Extracted orientation check out of the loop to increase performance
+      if (oriented) {
+        for (i = 0; i < node.links.length; ++i) {
+          link = node.links[i];
+          if (link.fromId === nodeId) {
+            callback(nodes[link.toId], link);
+          }
+        }
+      } else {
+        for (i = 0; i < node.links.length; ++i) {
+          link = node.links[i];
+          linkedNodeId = link.fromId === nodeId ? link.toId : link.fromId;
+
+          callback(nodes[linkedNodeId], link);
+        }
+      }
+    }
+  }
+
+  // we will not fire anything until users of this library explicitly call `on()`
+  // method.
+  function noop() {}
+
+  // Enter, Exit modification allows bulk graph updates without firing events.
+  function enterModificationReal() {
+    suspendEvents += 1;
+  }
+
+  function exitModificationReal() {
+    suspendEvents -= 1;
+    if (suspendEvents === 0 && changes.length > 0) {
+      graphPart.fire('changed', changes);
+      changes.length = 0;
+    }
+  }
+
+  function createNodeIterator() {
+    // Object.keys iterator is 1.3x faster than `for in` loop.
+    // See `https://github.com/anvaka/ngraph.graph/tree/bench-for-in-vs-obj-keys`
+    // branch for perf test
+    return Object.keys ? objectKeysIterator : forInIterator;
+  }
+
+  function objectKeysIterator(callback) {
+    if (typeof callback !== 'function') {
+      return;
+    }
+
+    var keys = Object.keys(nodes);
+    for (var i = 0; i < keys.length; ++i) {
+      if (callback(nodes[keys[i]])) {
+        return; // client doesn't want to proceed. Return.
+      }
+    }
+  }
+
+  function forInIterator(callback) {
+    if (typeof callback !== 'function') {
+      return;
+    }
+    var node;
+
+    for (node in nodes) {
+      if (callback(nodes[node])) {
+        return; // client doesn't want to proceed. Return.
+      }
+    }
+  }
+}
+
+// need this for old browsers. Should this be a separate module?
+function indexOfElementInArray(element, array) {
+  if (array.indexOf) {
+    return array.indexOf(element);
+  }
+
+  var len = array.length,
+    i;
+
+  for (i = 0; i < len; i += 1) {
+    if (array[i] === element) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * Internal structure to represent node;
+ */
+function Node(id) {
+  this.id = id;
+  this.links = [];
+  this.data = null;
+}
+
+
+/**
+ * Internal structure to represent links;
+ */
+function Link(fromId, toId, data, id) {
+  this.fromId = fromId;
+  this.toId = toId;
+  this.data = data;
+  this.id = id;
+}
+
+},{"ngraph.events":6}],11:[function(require,module,exports){
+module.exports = merge;
+
+/**
+ * Augments `target` with properties in `options`. Does not override
+ * target's properties if they are defined and matches expected type in 
+ * options
+ *
+ * @returns {Object} merged object
+ */
+function merge(target, options) {
+  var key;
+  if (!target) { target = {}; }
+  if (options) {
+    for (key in options) {
+      if (options.hasOwnProperty(key)) {
+        var targetHasIt = target.hasOwnProperty(key),
+            optionsValueType = typeof options[key],
+            shouldReplace = !targetHasIt || (typeof target[key] !== optionsValueType);
+
+        if (shouldReplace) {
+          target[key] = options[key];
+        } else if (optionsValueType === 'object') {
+          // go deep, don't care about loops here, we are simple API!:
+          target[key] = merge(target[key], options[key]);
+        }
+      }
+    }
+  }
+
+  return target;
+}
+
+},{}],12:[function(require,module,exports){
 /**
  * Manages a simulation of physical forces acting on bodies and springs.
  */
@@ -3217,7 +3942,7 @@ function physicsSimulator(settings) {
       gravity: -1.2,
 
       /**
-       * Theta coeffiecient from Barnes Hut simulation. Ranged between (0, 1).
+       * Theta coefficient from Barnes Hut simulation. Ranged between (0, 1).
        * The closer it's to 1 the more nodes algorithm will have to go through.
        * Setting it to one makes Barnes Hut simulation no different from
        * brute-force forces calculation (each node is considered).
@@ -3427,7 +4152,7 @@ function physicsSimulator(settings) {
   }
 };
 
-},{"./lib/bounds":11,"./lib/createBody":12,"./lib/dragForce":13,"./lib/eulerIntegrator":14,"./lib/spring":15,"./lib/springForce":16,"ngraph.expose":17,"ngraph.merge":25,"ngraph.quadtreebh":18}],11:[function(require,module,exports){
+},{"./lib/bounds":13,"./lib/createBody":14,"./lib/dragForce":15,"./lib/eulerIntegrator":16,"./lib/spring":17,"./lib/springForce":18,"ngraph.expose":19,"ngraph.merge":11,"ngraph.quadtreebh":21}],13:[function(require,module,exports){
 module.exports = function (bodies, settings) {
   var random = require('ngraph.random').random(42);
   var boundingBox =  { x1: 0, y1: 0, x2: 0, y2: 0 };
@@ -3509,14 +4234,14 @@ module.exports = function (bodies, settings) {
   }
 }
 
-},{"ngraph.random":22}],12:[function(require,module,exports){
+},{"ngraph.random":25}],14:[function(require,module,exports){
 var physics = require('ngraph.physics.primitives');
 
 module.exports = function(pos) {
   return new physics.Body(pos);
 }
 
-},{"ngraph.physics.primitives":9}],13:[function(require,module,exports){
+},{"ngraph.physics.primitives":20}],15:[function(require,module,exports){
 /**
  * Represents drag force, which reduces force value on each step by given
  * coefficient.
@@ -3545,7 +4270,7 @@ module.exports = function (options) {
   return api;
 };
 
-},{"ngraph.expose":17,"ngraph.merge":25}],14:[function(require,module,exports){
+},{"ngraph.expose":19,"ngraph.merge":11}],16:[function(require,module,exports){
 /**
  * Performs forces integration, using given timestep. Uses Euler method to solve
  * differential equation (http://en.wikipedia.org/wiki/Euler_method ).
@@ -3589,7 +4314,7 @@ function integrate(bodies, timeStep) {
   return (tx * tx + ty * ty)/bodies.length;
 }
 
-},{}],15:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 module.exports = Spring;
 
 /**
@@ -3605,7 +4330,7 @@ function Spring(fromBody, toBody, length, coeff, weight) {
     this.weight = typeof weight === 'number' ? weight : 1;
 };
 
-},{}],16:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 /**
  * Represents spring force, which updates forces acting on two bodies, conntected
  * by a spring.
@@ -3657,7 +4382,7 @@ module.exports = function (options) {
   return api;
 }
 
-},{"ngraph.expose":17,"ngraph.merge":25,"ngraph.random":22}],17:[function(require,module,exports){
+},{"ngraph.expose":19,"ngraph.merge":11,"ngraph.random":25}],19:[function(require,module,exports){
 module.exports = exposeProperties;
 
 /**
@@ -3703,288 +4428,328 @@ function augment(source, target, key) {
   }
 }
 
-},{}],18:[function(require,module,exports){
+},{}],20:[function(require,module,exports){
+module.exports=require(8)
+},{}],21:[function(require,module,exports){
 /**
- * This is Barnes Hut simulation algorithm. Implementation
- * is adopted to non-recursive solution, since certain browsers
- * handle recursion extremly bad.
+ * This is Barnes Hut simulation algorithm for 2d case. Implementation
+ * is highly optimized (avoids recusion and gc pressure)
  *
  * http://www.cs.princeton.edu/courses/archive/fall03/cs126/assignments/barnes-hut.html
  */
 
-module.exports = function (options) {
-    options = options || {};
-    options.gravity = typeof options.gravity === 'number' ? options.gravity : -1;
-    options.theta = typeof options.theta === 'number' ? options.theta : 0.8;
+module.exports = function(options) {
+  options = options || {};
+  options.gravity = typeof options.gravity === 'number' ? options.gravity : -1;
+  options.theta = typeof options.theta === 'number' ? options.theta : 0.8;
 
-    // we require deterministic randomness here
-    var random = require('ngraph.random').random(1984),
-        Node = require('./node'),
-        InsertStack = require('./insertStack'),
-        isSamePosition = require('./isSamePosition');
+  // we require deterministic randomness here
+  var random = require('ngraph.random').random(1984),
+    Node = require('./node'),
+    InsertStack = require('./insertStack'),
+    isSamePosition = require('./isSamePosition');
 
-    var gravity = options.gravity,
-        updateQueue = [],
-        insertStack = new InsertStack(),
-        theta = options.theta,
+  var gravity = options.gravity,
+    updateQueue = [],
+    insertStack = new InsertStack(),
+    theta = options.theta,
 
-        nodesCache = [],
-        currentInCache = 0,
-        newNode = function () {
-            // To avoid pressure on GC we reuse nodes.
-            var node = nodesCache[currentInCache];
-            if (node) {
-                node.quads[0] = null;
-                node.quads[1] = null;
-                node.quads[2] = null;
-                node.quads[3] = null;
-                node.body = null;
-                node.mass = node.massX = node.massY = 0;
-                node.left = node.right = node.top = node.bottom = 0;
-            } else {
-                node = new Node();
-                nodesCache[currentInCache] = node;
+    nodesCache = [],
+    currentInCache = 0,
+    newNode = function() {
+      // To avoid pressure on GC we reuse nodes.
+      var node = nodesCache[currentInCache];
+      if (node) {
+        node.quads[0] = null;
+        node.quads[1] = null;
+        node.quads[2] = null;
+        node.quads[3] = null;
+        node.body = null;
+        node.mass = node.massX = node.massY = 0;
+        node.left = node.right = node.top = node.bottom = 0;
+      } else {
+        node = new Node();
+        nodesCache[currentInCache] = node;
+      }
+
+      ++currentInCache;
+      return node;
+    },
+
+    root = newNode(),
+
+    // Inserts body to the tree
+    insert = function(newBody) {
+      insertStack.reset();
+      insertStack.push(root, newBody);
+
+      while (!insertStack.isEmpty()) {
+        var stackItem = insertStack.pop(),
+          node = stackItem.node,
+          body = stackItem.body;
+
+        if (!node.body) {
+          // This is internal node. Update the total mass of the node and center-of-mass.
+          var x = body.pos.x;
+          var y = body.pos.y;
+          node.mass = node.mass + body.mass;
+          node.massX = node.massX + body.mass * x;
+          node.massY = node.massY + body.mass * y;
+
+          // Recursively insert the body in the appropriate quadrant.
+          // But first find the appropriate quadrant.
+          var quadIdx = 0, // Assume we are in the 0's quad.
+            left = node.left,
+            right = (node.right + left) / 2,
+            top = node.top,
+            bottom = (node.bottom + top) / 2;
+
+          if (x > right) { // somewhere in the eastern part.
+            quadIdx = quadIdx + 1;
+            var oldLeft = left;
+            left = right;
+            right = right + (right - oldLeft);
+          }
+          if (y > bottom) { // and in south.
+            quadIdx = quadIdx + 2;
+            var oldTop = top;
+            top = bottom;
+            bottom = bottom + (bottom - oldTop);
+          }
+
+          var child = node.quads[quadIdx];
+          if (!child) {
+            // The node is internal but this quadrant is not taken. Add
+            // subnode to it.
+            child = newNode();
+            child.left = left;
+            child.top = top;
+            child.right = right;
+            child.bottom = bottom;
+            child.body = body;
+
+            node.quads[quadIdx] = child;
+          } else {
+            // continue searching in this quadrant.
+            insertStack.push(child, body);
+          }
+        } else {
+          // We are trying to add to the leaf node.
+          // We have to convert current leaf into internal node
+          // and continue adding two nodes.
+          var oldBody = node.body;
+          node.body = null; // internal nodes do not cary bodies
+
+          if (isSamePosition(oldBody.pos, body.pos)) {
+            // Prevent infinite subdivision by bumping one node
+            // anywhere in this quadrant
+            var retriesCount = 3;
+            do {
+              var offset = random.nextDouble();
+              var dx = (node.right - node.left) * offset;
+              var dy = (node.bottom - node.top) * offset;
+
+              oldBody.pos.x = node.left + dx;
+              oldBody.pos.y = node.top + dy;
+              retriesCount -= 1;
+              // Make sure we don't bump it out of the box. If we do, next iteration should fix it
+            } while (retriesCount > 0 && isSamePosition(oldBody.pos, body.pos));
+
+            if (retriesCount === 0 && isSamePosition(oldBody.pos, body.pos)) {
+              // This is very bad, we ran out of precision.
+              // if we do not return from the method we'll get into
+              // infinite loop here. So we sacrifice correctness of layout, and keep the app running
+              // Next layout iteration should get larger bounding box in the first step and fix this
+              return;
             }
-
-            ++currentInCache;
-            return node;
-        },
-
-        root = newNode(),
-
-        // Inserts body to the tree
-        insert = function (newBody) {
-            insertStack.reset();
-            insertStack.push(root, newBody);
-
-            while (!insertStack.isEmpty()) {
-                var stackItem = insertStack.pop(),
-                    node = stackItem.node,
-                    body = stackItem.body;
-
-                if (!node.body) {
-                    // This is internal node. Update the total mass of the node and center-of-mass.
-                    var x = body.pos.x;
-                    var y = body.pos.y;
-                    node.mass = node.mass + body.mass;
-                    node.massX = node.massX + body.mass * x;
-                    node.massY = node.massY + body.mass * y;
-
-                    // Recursively insert the body in the appropriate quadrant.
-                    // But first find the appropriate quadrant.
-                    var quadIdx = 0, // Assume we are in the 0's quad.
-                        left = node.left,
-                        right = (node.right + left) / 2,
-                        top = node.top,
-                        bottom = (node.bottom + top) / 2;
-
-                    if (x > right) { // somewhere in the eastern part.
-                        quadIdx = quadIdx + 1;
-                        var oldLeft = left;
-                        left = right;
-                        right = right + (right - oldLeft);
-                    }
-                    if (y > bottom) { // and in south.
-                        quadIdx = quadIdx + 2;
-                        var oldTop = top;
-                        top = bottom;
-                        bottom = bottom + (bottom - oldTop);
-                    }
-
-                    var child = node.quads[quadIdx];
-                    if (!child) {
-                        // The node is internal but this quadrant is not taken. Add
-                        // subnode to it.
-                        child = newNode();
-                        child.left = left;
-                        child.top = top;
-                        child.right = right;
-                        child.bottom = bottom;
-                        child.body = body;
-
-                        node.quads[quadIdx] = child;
-                    } else {
-                        // continue searching in this quadrant.
-                        insertStack.push(child, body);
-                    }
-                } else {
-                    // We are trying to add to the leaf node.
-                    // We have to convert current leaf into internal node
-                    // and continue adding two nodes.
-                    var oldBody = node.body;
-                    node.body = null; // internal nodes do not cary bodies
-
-                    if (isSamePosition(oldBody.pos, body.pos)) {
-                        // Prevent infinite subdivision by bumping one node
-                        // anywhere in this quadrant
-                        if (node.right - node.left < 1e-8) {
-                            // This is very bad, we ran out of precision.
-                            // if we do not return from the method we'll get into
-                            // infinite loop here. So we sacrifice correctness of layout, and keep the app running
-                            // Next layout iteration should get larger bounding box in the first step and fix this
-                            return;
-                        }
-                        do {
-                            var offset = random.nextDouble();
-                            var dx = (node.right - node.left) * offset;
-                            var dy = (node.bottom - node.top) * offset;
-
-                            oldBody.pos.x = node.left + dx;
-                            oldBody.pos.y = node.top + dy;
-                            // Make sure we don't bump it out of the box. If we do, next iteration should fix it
-                        } while (isSamePosition(oldBody.pos, body.pos));
-
-                    }
-                    // Next iteration should subdivide node further.
-                    insertStack.push(node, oldBody);
-                    insertStack.push(node, body);
-                }
-           }
-        },
-
-        update = function (sourceBody) {
-            var queue = updateQueue,
-                v,
-                dx,
-                dy,
-                r,
-                queueLength = 1,
-                shiftIdx = 0,
-                pushIdx = 1;
-
-            queue[0] = root;
-
-            while (queueLength) {
-                var node = queue[shiftIdx],
-                    body = node.body;
-
-                queueLength -= 1;
-                shiftIdx += 1;
-                // technically there should be external "if (body !== sourceBody) {"
-                // but in practice it gives slightghly worse performance, and does not
-                // have impact on layout correctness
-                if (body && body !== sourceBody) {
-                    // If the current node is a leaf node (and it is not source body),
-                    // calculate the force exerted by the current node on body, and add this
-                    // amount to body's net force.
-                    dx = body.pos.x - sourceBody.pos.x;
-                    dy = body.pos.y - sourceBody.pos.y;
-                    r = Math.sqrt(dx * dx + dy * dy);
-
-                    if (r === 0) {
-                        // Poor man's protection against zero distance.
-                        dx = (random.nextDouble() - 0.5) / 50;
-                        dy = (random.nextDouble() - 0.5) / 50;
-                        r = Math.sqrt(dx * dx + dy * dy);
-                    }
-
-                    // This is standard gravition force calculation but we divide
-                    // by r^3 to save two operations when normalizing force vector.
-                    v = gravity * body.mass * sourceBody.mass / (r * r * r);
-                    sourceBody.force.x += v * dx;
-                    sourceBody.force.y += v * dy;
-                } else {
-                    // Otherwise, calculate the ratio s / r,  where s is the width of the region
-                    // represented by the internal node, and r is the distance between the body
-                    // and the node's center-of-mass
-                    dx = node.massX / node.mass - sourceBody.pos.x;
-                    dy = node.massY / node.mass - sourceBody.pos.y;
-                    r = Math.sqrt(dx * dx + dy * dy);
-
-                    if (r === 0) {
-                        // Sorry about code duplucation. I don't want to create many functions
-                        // right away. Just want to see performance first.
-                        dx = (random.nextDouble() - 0.5) / 50;
-                        dy = (random.nextDouble() - 0.5) / 50;
-                        r = Math.sqrt(dx * dx + dy * dy);
-                    }
-                    // If s / r < θ, treat this internal node as a single body, and calculate the
-                    // force it exerts on body b, and add this amount to b's net force.
-                    if ((node.right - node.left) / r < theta) {
-                        // in the if statement above we consider node's width only
-                        // because the region was squarified during tree creation.
-                        // Thus there is no difference between using width or height.
-                        v = gravity * node.mass * sourceBody.mass / (r * r * r);
-                        sourceBody.force.x += v * dx;
-                        sourceBody.force.y += v * dy;
-                    } else {
-                        // Otherwise, run the procedure recursively on each of the current node's children.
-
-                        // I intentionally unfolded this loop, to save several CPU cycles.
-                        if (node.quads[0]) { queue[pushIdx] = node.quads[0]; queueLength += 1; pushIdx += 1; }
-                        if (node.quads[1]) { queue[pushIdx] = node.quads[1]; queueLength += 1; pushIdx += 1; }
-                        if (node.quads[2]) { queue[pushIdx] = node.quads[2]; queueLength += 1; pushIdx += 1; }
-                        if (node.quads[3]) { queue[pushIdx] = node.quads[3]; queueLength += 1; pushIdx += 1; }
-                    }
-                }
-            }
-        },
-
-        insertBodies = function (bodies) {
-            var x1 = Number.MAX_VALUE,
-                y1 = Number.MAX_VALUE,
-                x2 = Number.MIN_VALUE,
-                y2 = Number.MIN_VALUE,
-                i,
-                max = bodies.length;
-
-            // To reduce quad tree depth we are looking for exact bounding box of all particles.
-            i = max;
-            while (i--) {
-                var x = bodies[i].pos.x;
-                var y = bodies[i].pos.y;
-                if (x < x1) { x1 = x; }
-                if (x > x2) { x2 = x; }
-                if (y < y1) { y1 = y; }
-                if (y > y2) { y2 = y; }
-            }
-
-            // Squarify the bounds.
-            var dx = x2 - x1,
-                dy = y2 - y1;
-            if (dx > dy) { y2 = y1 + dx; } else { x2 = x1 + dy; }
-
-            currentInCache = 0;
-            root = newNode();
-            root.left = x1;
-            root.right = x2;
-            root.top = y1;
-            root.bottom = y2;
-
-            i = max - 1;
-            if (i > 0) {
-              root.body = bodies[i];
-            }
-            while (i--) {
-                insert(bodies[i], root);
-            }
-        };
-
-    return {
-        insertBodies : insertBodies,
-        updateBodyForce : update,
-        options : function (newOptions) {
-            if (newOptions) {
-                if (typeof newOptions.gravity === 'number') { gravity = newOptions.gravity; }
-                if (typeof newOptions.theta === 'number') { theta = newOptions.theta; }
-
-                return this;
-            }
-
-            return {gravity : gravity, theta : theta};
+          }
+          // Next iteration should subdivide node further.
+          insertStack.push(node, oldBody);
+          insertStack.push(node, body);
         }
+      }
+    },
+
+    update = function(sourceBody) {
+      var queue = updateQueue,
+        v,
+        dx,
+        dy,
+        r, fx = 0,
+        fy = 0,
+        queueLength = 1,
+        shiftIdx = 0,
+        pushIdx = 1;
+
+      queue[0] = root;
+
+      while (queueLength) {
+        var node = queue[shiftIdx],
+          body = node.body;
+
+        queueLength -= 1;
+        shiftIdx += 1;
+        // technically there should be external "if (body !== sourceBody) {"
+        // but in practice it gives slightghly worse performance, and does not
+        // have impact on layout correctness
+        if (body && body !== sourceBody) {
+          // If the current node is a leaf node (and it is not source body),
+          // calculate the force exerted by the current node on body, and add this
+          // amount to body's net force.
+          dx = body.pos.x - sourceBody.pos.x;
+          dy = body.pos.y - sourceBody.pos.y;
+          r = Math.sqrt(dx * dx + dy * dy);
+
+          if (r === 0) {
+            // Poor man's protection against zero distance.
+            dx = (random.nextDouble() - 0.5) / 50;
+            dy = (random.nextDouble() - 0.5) / 50;
+            r = Math.sqrt(dx * dx + dy * dy);
+          }
+
+          // This is standard gravition force calculation but we divide
+          // by r^3 to save two operations when normalizing force vector.
+          v = gravity * body.mass * sourceBody.mass / (r * r * r);
+          fx += v * dx;
+          fy += v * dy;
+        } else {
+          // Otherwise, calculate the ratio s / r,  where s is the width of the region
+          // represented by the internal node, and r is the distance between the body
+          // and the node's center-of-mass
+          dx = node.massX / node.mass - sourceBody.pos.x;
+          dy = node.massY / node.mass - sourceBody.pos.y;
+          r = Math.sqrt(dx * dx + dy * dy);
+
+          if (r === 0) {
+            // Sorry about code duplucation. I don't want to create many functions
+            // right away. Just want to see performance first.
+            dx = (random.nextDouble() - 0.5) / 50;
+            dy = (random.nextDouble() - 0.5) / 50;
+            r = Math.sqrt(dx * dx + dy * dy);
+          }
+          // If s / r < θ, treat this internal node as a single body, and calculate the
+          // force it exerts on sourceBody, and add this amount to sourceBody's net force.
+          if ((node.right - node.left) / r < theta) {
+            // in the if statement above we consider node's width only
+            // because the region was squarified during tree creation.
+            // Thus there is no difference between using width or height.
+            v = gravity * node.mass * sourceBody.mass / (r * r * r);
+            fx += v * dx;
+            fy += v * dy;
+          } else {
+            // Otherwise, run the procedure recursively on each of the current node's children.
+
+            // I intentionally unfolded this loop, to save several CPU cycles.
+            if (node.quads[0]) {
+              queue[pushIdx] = node.quads[0];
+              queueLength += 1;
+              pushIdx += 1;
+            }
+            if (node.quads[1]) {
+              queue[pushIdx] = node.quads[1];
+              queueLength += 1;
+              pushIdx += 1;
+            }
+            if (node.quads[2]) {
+              queue[pushIdx] = node.quads[2];
+              queueLength += 1;
+              pushIdx += 1;
+            }
+            if (node.quads[3]) {
+              queue[pushIdx] = node.quads[3];
+              queueLength += 1;
+              pushIdx += 1;
+            }
+          }
+        }
+      }
+
+      sourceBody.force.x += fx;
+      sourceBody.force.y += fy;
+    },
+
+    insertBodies = function(bodies) {
+      var x1 = Number.MAX_VALUE,
+        y1 = Number.MAX_VALUE,
+        x2 = Number.MIN_VALUE,
+        y2 = Number.MIN_VALUE,
+        i,
+        max = bodies.length;
+
+      // To reduce quad tree depth we are looking for exact bounding box of all particles.
+      i = max;
+      while (i--) {
+        var x = bodies[i].pos.x;
+        var y = bodies[i].pos.y;
+        if (x < x1) {
+          x1 = x;
+        }
+        if (x > x2) {
+          x2 = x;
+        }
+        if (y < y1) {
+          y1 = y;
+        }
+        if (y > y2) {
+          y2 = y;
+        }
+      }
+
+      // Squarify the bounds.
+      var dx = x2 - x1,
+        dy = y2 - y1;
+      if (dx > dy) {
+        y2 = y1 + dx;
+      } else {
+        x2 = x1 + dy;
+      }
+
+      currentInCache = 0;
+      root = newNode();
+      root.left = x1;
+      root.right = x2;
+      root.top = y1;
+      root.bottom = y2;
+
+      i = max - 1;
+      if (i > 0) {
+        root.body = bodies[i];
+      }
+      while (i--) {
+        insert(bodies[i], root);
+      }
     };
+
+  return {
+    insertBodies: insertBodies,
+    updateBodyForce: update,
+    options: function(newOptions) {
+      if (newOptions) {
+        if (typeof newOptions.gravity === 'number') {
+          gravity = newOptions.gravity;
+        }
+        if (typeof newOptions.theta === 'number') {
+          theta = newOptions.theta;
+        }
+
+        return this;
+      }
+
+      return {
+        gravity: gravity,
+        theta: theta
+      };
+    }
+  };
 };
 
-
-},{"./insertStack":19,"./isSamePosition":20,"./node":21,"ngraph.random":22}],19:[function(require,module,exports){
+},{"./insertStack":22,"./isSamePosition":23,"./node":24,"ngraph.random":25}],22:[function(require,module,exports){
 module.exports = InsertStack;
 
 /**
- * Our implmentation of QuadTree is non-recursive (recursion handled not really
- * well in old browsers). This data structure represent stack of elemnts
- * which we are trying to insert into quad tree. It also avoids unnecessary
- * memory pressue when we are adding more elements
+ * Our implmentation of QuadTree is non-recursive to avoid GC hit
+ * This data structure represent stack of elements
+ * which we are trying to insert into quad tree.
  */
 function InsertStack () {
     this.stack = [];
@@ -4022,7 +4787,7 @@ function InsertStackElement(node, body) {
     this.body = body; // physical body which needs to be inserted to node
 }
 
-},{}],20:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 module.exports = function isSamePosition(point1, point2) {
     var dx = Math.abs(point1.x - point2.x);
     var dy = Math.abs(point1.y - point2.y);
@@ -4030,7 +4795,7 @@ module.exports = function isSamePosition(point1, point2) {
     return (dx < 1e-8 && dy < 1e-8);
 };
 
-},{}],21:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 /**
  * Internal data structure to represent 2D QuadTree node
  */
@@ -4057,12 +4822,9 @@ module.exports = function Node() {
   this.top = 0;
   this.bottom = 0;
   this.right = 0;
-
-  // Node is internal when it is not a leaf
-  this.isInternal = false;
 };
 
-},{}],22:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 module.exports = {
   random: random,
   randomIterator: randomIterator
@@ -4149,576 +4911,14 @@ function randomIterator(array, customRandom) {
     };
 }
 
-},{}],23:[function(require,module,exports){
-/**
- * @fileOverview Contains definition of the core graph object.
- */
-
-
-/**
- * @example
- *  var graph = require('ngraph.graph')();
- *  graph.addNode(1);     // graph has one node.
- *  graph.addLink(2, 3);  // now graph contains three nodes and one link.
- *
- */
-module.exports = function () {
-    // Graph structure is maintained as dictionary of nodes
-    // and array of links. Each node has 'links' property which
-    // hold all links related to that node. And general links
-    // array is used to speed up all links enumeration. This is inefficient
-    // in terms of memory, but simplifies coding.
-
-    var nodes = typeof Object.create === 'function' ? Object.create(null) : {},
-        links = [],
-        // Hash of multi-edges. Used to track ids of edges between same nodes
-        multiEdges = {},
-        nodesCount = 0,
-        suspendEvents = 0,
-
-        // Accumlates all changes made during graph updates.
-        // Each change element contains:
-        //  changeType - one of the strings: 'add', 'remove' or 'update';
-        //  node - if change is related to node this property is set to changed graph's node;
-        //  link - if change is related to link this property is set to changed graph's link;
-        changes = [],
-
-        fireGraphChanged = function (graph) {
-            graph.fire('changed', changes);
-        },
-
-        // Enter, Exit Mofidication allows bulk graph updates without firing events.
-        enterModification = function () {
-            suspendEvents += 1;
-        },
-
-        exitModification = function (graph) {
-            suspendEvents -= 1;
-            if (suspendEvents === 0 && changes.length > 0) {
-                fireGraphChanged(graph);
-                changes.length = 0;
-            }
-        },
-
-        recordNodeChange = function (node, changeType) {
-            changes.push({node : node, changeType : changeType});
-        },
-
-        recordLinkChange = function (link, changeType) {
-            changes.push({link : link, changeType : changeType});
-        },
-        linkConnectionSymbol = '👉 ';
-
-    var graphPart = {
-
-        /**
-         * Adds node to the graph. If node with given id already exists in the graph
-         * its data is extended with whatever comes in 'data' argument.
-         *
-         * @param nodeId the node's identifier. A string or number is preferred.
-         *   note: Node id should not contain 'linkConnectionSymbol'. This will break link identifiers
-         * @param [data] additional data for the node being added. If node already
-         *   exists its data object is augmented with the new one.
-         *
-         * @return {node} The newly added node or node with given id if it already exists.
-         */
-        addNode : function (nodeId, data) {
-            if (typeof nodeId === 'undefined') {
-                throw new Error('Invalid node identifier');
-            }
-
-            enterModification();
-
-            var node = this.getNode(nodeId);
-            if (!node) {
-                // TODO: Should I check for linkConnectionSymbol here?
-                node = new Node(nodeId);
-                nodesCount++;
-
-                recordNodeChange(node, 'add');
-            } else {
-                recordNodeChange(node, 'update');
-            }
-
-            node.data = data;
-
-            nodes[nodeId] = node;
-
-            exitModification(this);
-            return node;
-        },
-
-        /**
-         * Adds a link to the graph. The function always create a new
-         * link between two nodes. If one of the nodes does not exists
-         * a new node is created.
-         *
-         * @param fromId link start node id;
-         * @param toId link end node id;
-         * @param [data] additional data to be set on the new link;
-         *
-         * @return {link} The newly created link
-         */
-        addLink : function (fromId, toId, data) {
-            enterModification();
-
-            var fromNode = this.getNode(fromId) || this.addNode(fromId);
-            var toNode = this.getNode(toId) || this.addNode(toId);
-
-            var linkId = fromId.toString() + linkConnectionSymbol + toId.toString();
-            var isMultiEdge = multiEdges.hasOwnProperty(linkId);
-            if (isMultiEdge || this.hasLink(fromId, toId)) {
-                if (!isMultiEdge) {
-                    multiEdges[linkId] = 0;
-                }
-                linkId += '@' + (++multiEdges[linkId]);
-            }
-
-            var link = new Link(fromId, toId, data, linkId);
-
-            links.push(link);
-
-            // TODO: this is not cool. On large graphs potentially would consume more memory.
-            fromNode.links.push(link);
-            toNode.links.push(link);
-
-            recordLinkChange(link, 'add');
-
-            exitModification(this);
-
-            return link;
-        },
-
-        /**
-         * Removes link from the graph. If link does not exist does nothing.
-         *
-         * @param link - object returned by addLink() or getLinks() methods.
-         *
-         * @returns true if link was removed; false otherwise.
-         */
-        removeLink : function (link) {
-            if (!link) { return false; }
-            var idx = indexOfElementInArray(link, links);
-            if (idx < 0) { return false; }
-
-            enterModification();
-
-            links.splice(idx, 1);
-
-            var fromNode = this.getNode(link.fromId);
-            var toNode = this.getNode(link.toId);
-
-            if (fromNode) {
-                idx = indexOfElementInArray(link, fromNode.links);
-                if (idx >= 0) {
-                    fromNode.links.splice(idx, 1);
-                }
-            }
-
-            if (toNode) {
-                idx = indexOfElementInArray(link, toNode.links);
-                if (idx >= 0) {
-                    toNode.links.splice(idx, 1);
-                }
-            }
-
-            recordLinkChange(link, 'remove');
-
-            exitModification(this);
-
-            return true;
-        },
-
-        /**
-         * Removes node with given id from the graph. If node does not exist in the graph
-         * does nothing.
-         *
-         * @param nodeId node's identifier passed to addNode() function.
-         *
-         * @returns true if node was removed; false otherwise.
-         */
-        removeNode: function (nodeId) {
-            var node = this.getNode(nodeId);
-            if (!node) { return false; }
-
-            enterModification();
-
-            while (node.links.length) {
-                var link = node.links[0];
-                this.removeLink(link);
-            }
-
-            delete nodes[nodeId];
-            nodesCount--;
-
-            recordNodeChange(node, 'remove');
-
-            exitModification(this);
-
-            return true;
-        },
-
-        /**
-         * Gets node with given identifier. If node does not exist undefined value is returned.
-         *
-         * @param nodeId requested node identifier;
-         *
-         * @return {node} in with requested identifier or undefined if no such node exists.
-         */
-        getNode : function (nodeId) {
-            return nodes[nodeId];
-        },
-
-        /**
-         * Gets number of nodes in this graph.
-         *
-         * @return number of nodes in the graph.
-         */
-        getNodesCount : function () {
-            return nodesCount;
-        },
-
-        /**
-         * Gets total number of links in the graph.
-         */
-        getLinksCount : function () {
-            return links.length;
-        },
-
-        /**
-         * Gets all links (inbound and outbound) from the node with given id.
-         * If node with given id is not found null is returned.
-         *
-         * @param nodeId requested node identifier.
-         *
-         * @return Array of links from and to requested node if such node exists;
-         *   otherwise null is returned.
-         */
-        getLinks : function (nodeId) {
-            var node = this.getNode(nodeId);
-            return node ? node.links : null;
-        },
-
-        /**
-         * Invokes callback on each node of the graph.
-         *
-         * @param {Function(node)} callback Function to be invoked. The function
-         *   is passed one argument: visited node.
-         */
-        forEachNode : function (callback) {
-            if (typeof callback !== 'function') {
-                return;
-            }
-            var node;
-
-            for (node in nodes) {
-                if (callback(nodes[node])) {
-                    return; // client doesn't want to proceed. return.
-                }
-            }
-        },
-
-        /**
-         * Invokes callback on every linked (adjacent) node to the given one.
-         *
-         * @param nodeId Identifier of the requested node.
-         * @param {Function(node, link)} callback Function to be called on all linked nodes.
-         *   The function is passed two parameters: adjacent node and link object itself.
-         * @param oriented if true graph treated as oriented.
-         */
-        forEachLinkedNode : function (nodeId, callback, oriented) {
-            var node = this.getNode(nodeId),
-                i,
-                link,
-                linkedNodeId;
-
-            if (node && node.links && typeof callback === 'function') {
-                // Extraced orientation check out of the loop to increase performance
-                if (oriented) {
-                    for (i = 0; i < node.links.length; ++i) {
-                        link = node.links[i];
-                        if (link.fromId === nodeId) {
-                            callback(nodes[link.toId], link);
-                        }
-                    }
-                } else {
-                    for (i = 0; i < node.links.length; ++i) {
-                        link = node.links[i];
-                        linkedNodeId = link.fromId === nodeId ? link.toId : link.fromId;
-
-                        callback(nodes[linkedNodeId], link);
-                    }
-                }
-            }
-        },
-
-        /**
-         * Enumerates all links in the graph
-         *
-         * @param {Function(link)} callback Function to be called on all links in the graph.
-         *   The function is passed one parameter: graph's link object.
-         *
-         * Link object contains at least the following fields:
-         *  fromId - node id where link starts;
-         *  toId - node id where link ends,
-         *  data - additional data passed to graph.addLink() method.
-         */
-        forEachLink : function (callback) {
-            var i, length;
-            if (typeof callback === 'function') {
-                for (i = 0, length = links.length; i < length; ++i) {
-                    callback(links[i]);
-                }
-            }
-        },
-
-        /**
-         * Suspend all notifications about graph changes until
-         * endUpdate is called.
-         */
-        beginUpdate : function () {
-            enterModification();
-        },
-
-        /**
-         * Resumes all notifications about graph changes and fires
-         * graph 'changed' event in case there are any pending changes.
-         */
-        endUpdate : function () {
-            exitModification(this);
-        },
-
-        /**
-         * Removes all nodes and links from the graph.
-         */
-        clear : function () {
-            var that = this;
-            that.beginUpdate();
-            that.forEachNode(function (node) { that.removeNode(node.id); });
-            that.endUpdate();
-        },
-
-        /**
-         * Detects whether there is a link between two nodes.
-         * Operation complexity is O(n) where n - number of links of a node.
-         *
-         * @returns link if there is one. null otherwise.
-         */
-        hasLink : function (fromNodeId, toNodeId) {
-            // TODO: Use adjacency matrix to speed up this operation.
-            var node = this.getNode(fromNodeId),
-                i;
-            if (!node) {
-                return null;
-            }
-
-            for (i = 0; i < node.links.length; ++i) {
-                var link = node.links[i];
-                if (link.fromId === fromNodeId && link.toId === toNodeId) {
-                    return link;
-                }
-            }
-
-            return null; // no link.
-        }
-    };
-
-    // Let graph fire events before we return it to the caller.
-    var eventify = require('ngraph.events');
-    eventify(graphPart);
-
-    return graphPart;
-};
-
-// need this for old browsers. Should this be a separate module?
-function indexOfElementInArray(element, array) {
-    if (array.indexOf) {
-        return array.indexOf(element);
-    }
-
-    var len = array.length,
-        i;
-
-    for (i = 0; i < len; i += 1) {
-        if (array[i] === element) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-/**
- * Internal structure to represent node;
- */
-function Node(id) {
-    this.id = id;
-    this.links = [];
-    this.data = null;
-}
-
-
-/**
- * Internal structure to represent links;
- */
-function Link(fromId, toId, data, id) {
-    this.fromId = fromId;
-    this.toId = toId;
-    this.data = data;
-    this.id = id;
-}
-
-},{"ngraph.events":24}],24:[function(require,module,exports){
-module.exports = function(subject) {
-  validateSubject(subject);
-
-  var eventsStorage = createEventsStorage(subject);
-  subject.on = eventsStorage.on;
-  subject.off = eventsStorage.off;
-  subject.fire = eventsStorage.fire;
-  return subject;
-};
-
-function createEventsStorage(subject) {
-  // Store all event listeners to this hash. Key is event name, value is array
-  // of callback records.
-  //
-  // A callback record consists of callback function and its optional context:
-  // { 'eventName' => [{callback: function, ctx: object}] }
-  var registeredEvents = {};
-
-  return {
-    on: function (eventName, callback, ctx) {
-      if (typeof callback !== 'function') {
-        throw new Error('callback is expected to be a function');
-      }
-      if (!registeredEvents.hasOwnProperty(eventName)) {
-        registeredEvents[eventName] = [];
-      }
-      registeredEvents[eventName].push({callback: callback, ctx: ctx});
-
-      return subject;
-    },
-
-    off: function (eventName, callback) {
-      var wantToRemoveAll = (typeof eventName === 'undefined');
-      if (wantToRemoveAll) {
-        // Killing old events storage should be enough in this case:
-        registeredEvents = {};
-        return subject;
-      }
-
-      if (registeredEvents.hasOwnProperty(eventName)) {
-        var deleteAllCallbacksForEvent = (typeof callback !== 'function');
-        if (deleteAllCallbacksForEvent) {
-          delete registeredEvents[eventName];
-        } else {
-          var callbacks = registeredEvents[eventName];
-          for (var i = 0; i < callbacks.length; ++i) {
-            if (callbacks[i].callback === callback) {
-              callbacks.splice(i, 1);
-            }
-          }
-        }
-      }
-
-      return subject;
-    },
-
-    fire: function (eventName) {
-      var noEventsToFire = !registeredEvents.hasOwnProperty(eventName);
-      if (noEventsToFire) {
-        return subject; 
-      }
-
-      var callbacks = registeredEvents[eventName];
-      var fireArguments = Array.prototype.splice.call(arguments, 1);
-      for(var i = 0; i < callbacks.length; ++i) {
-        var callbackInfo = callbacks[i];
-        callbackInfo.callback.apply(callbackInfo.ctx, fireArguments);
-      }
-
-      return subject;
-    }
-  };
-}
-
-function validateSubject(subject) {
-  if (!subject) {
-    throw new Error('Eventify cannot use falsy object as events subject');
-  }
-  var reservedWords = ['on', 'fire', 'off'];
-  for (var i = 0; i < reservedWords.length; ++i) {
-    if (subject.hasOwnProperty(reservedWords[i])) {
-      throw new Error("Subject cannot be eventified, since it already has property '" + reservedWords[i] + "'");
-    }
-  }
-}
-
-},{}],25:[function(require,module,exports){
-module.exports = merge;
-
-/**
- * Augments `target` with properties in `options`. Does not override
- * target's properties if they are defined and matches expected type in 
- * options
- *
- * @returns {Object} merged object
- */
-function merge(target, options) {
-  var key;
-  if (!target) { target = {}; }
-  if (options) {
-    for (key in options) {
-      if (options.hasOwnProperty(key)) {
-        var targetHasIt = target.hasOwnProperty(key),
-            optionsValueType = typeof options[key],
-            shouldReplace = !targetHasIt || (typeof target[key] !== optionsValueType);
-
-        if (shouldReplace) {
-          target[key] = options[key];
-        } else if (optionsValueType === 'object') {
-          // go deep, don't care about loops here, we are simple API!:
-          target[key] = merge(target[key], options[key]);
-        }
-      }
-    }
-  }
-
-  return target;
-}
-
 },{}],26:[function(require,module,exports){
-module.exports=require(10)
-},{"./lib/bounds":27,"./lib/createBody":28,"./lib/dragForce":29,"./lib/eulerIntegrator":30,"./lib/spring":31,"./lib/springForce":32,"ngraph.expose":33,"ngraph.merge":25,"ngraph.quadtreebh":35}],27:[function(require,module,exports){
-module.exports=require(11)
-},{"ngraph.random":39}],28:[function(require,module,exports){
-module.exports=require(12)
-},{"ngraph.physics.primitives":34}],29:[function(require,module,exports){
-module.exports=require(13)
-},{"ngraph.expose":33,"ngraph.merge":25}],30:[function(require,module,exports){
-module.exports=require(14)
-},{}],31:[function(require,module,exports){
-module.exports=require(15)
-},{}],32:[function(require,module,exports){
-module.exports=require(16)
-},{"ngraph.expose":33,"ngraph.merge":25,"ngraph.random":39}],33:[function(require,module,exports){
-module.exports=require(17)
-},{}],34:[function(require,module,exports){
-module.exports=require(9)
-},{}],35:[function(require,module,exports){
-module.exports=require(18)
-},{"./insertStack":36,"./isSamePosition":37,"./node":38,"ngraph.random":39}],36:[function(require,module,exports){
-module.exports=require(19)
-},{}],37:[function(require,module,exports){
-module.exports=require(20)
-},{}],38:[function(require,module,exports){
-module.exports=require(21)
-},{}],39:[function(require,module,exports){
-module.exports=require(22)
-},{}],40:[function(require,module,exports){
 module.exports = svg;
+
 svg.compile = require('./lib/compile');
+
+var compileTemplate = svg.compileTemplate = require('./lib/compileTemplate');
+
+var domEvents = require('add-event-listener');
 
 var svgns = "http://www.w3.org/2000/svg";
 var xlinkns = "http://www.w3.org/1999/xlink";
@@ -4732,14 +4932,40 @@ function svg(element) {
     return element;
   }
 
+  var compiledTempalte;
+
   svgElement.simplesvg = true; // this is not good, since we are monkey patching svg
   svgElement.attr = attr;
   svgElement.append = append;
+  svgElement.link = link;
+
+  // add easy eventing
+  svgElement.on = on;
+  svgElement.off = off;
+
+  // data binding:
+  svgElement.dataSource = dataSource;
 
   return svgElement;
 
-  function append(child) {
-    svgElement.appendChild(svg(child));
+  function dataSource(model) {
+    if (!compiledTempalte) compiledTempalte = compileTemplate(svgElement);
+    compiledTempalte.link(model);
+  }
+
+  function on(name, cb, useCapture) {
+    domEvents.addEventListener(svgElement, name, cb, useCapture);
+    return svgElement;
+  }
+
+  function off(name, cb, useCapture) {
+    domEvents.removeEventListener(svgElement, name, cb, useCapture);
+    return svgElement;
+  }
+
+  function append(content) {
+    var child = svg(content);
+    svgElement.appendChild(child);
 
     return child;
   }
@@ -4757,25 +4983,204 @@ function svg(element) {
 
     return svgElement.getAttributeNS(null, name);
   }
+
+  function link(target) {
+    if (arguments.length) {
+      svgElement.setAttributeNS(xlinkns, "xlink:href", target);
+      return svgElement;
+    }
+
+    return svgElement.getAttributeNS(xlinkns, "xlink:href");
+  }
 }
 
-},{"./lib/compile":41}],41:[function(require,module,exports){
-var parser = new DOMParser();
+},{"./lib/compile":27,"./lib/compileTemplate":28,"add-event-listener":30}],27:[function(require,module,exports){
+var parser = require('./domparser.js');
 var svg = require('../');
 
 module.exports = compile;
 
 function compile(svgText) {
   try {
-    return svg(parser.parseFromString(
-      '<g xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg">' +
-      svgText + '</g>', "text/xml").documentElement);
+    svgText = addNamespaces(svgText);
+    return svg(parser.parseFromString(svgText, "text/xml").documentElement);
   } catch (e) {
     throw e;
   }
 }
 
-},{"../":40}],42:[function(require,module,exports){
+function addNamespaces(text) {
+  if (!text) return;
+
+  var namespaces = 'xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg"';
+  var match = text.match(/^<\w+/);
+  if (match) {
+    var tagLength = match[0].length;
+    return text.substr(0, tagLength) + ' ' + namespaces + ' ' + text.substr(tagLength);
+  } else {
+    throw new Error('Cannot parse input text: invalid xml?');
+  }
+}
+
+},{"../":26,"./domparser.js":29}],28:[function(require,module,exports){
+module.exports = template;
+
+var BINDING_EXPR = /{{(.+?)}}/;
+
+function template(domNode) {
+  var allBindings = Object.create(null);
+  extractAllBindings(domNode, allBindings);
+
+  return {
+    link: function(model) {
+      Object.keys(allBindings).forEach(function(key) {
+        var setter = allBindings[key];
+        setter.forEach(changeModel);
+      });
+
+      function changeModel(setter) {
+        setter(model);
+      }
+    }
+  };
+}
+
+function extractAllBindings(domNode, allBindings) {
+  var nodeType = domNode.nodeType;
+  var typeSupported = (nodeType === 1) || (nodeType === 3);
+  if (!typeSupported) return;
+  var i;
+  if (domNode.hasChildNodes()) {
+    var domChildren = domNode.childNodes;
+    for (i = 0; i < domChildren.length; ++i) {
+      extractAllBindings(domChildren[i], allBindings);
+    }
+  }
+
+  if (nodeType === 3) { // text:
+    bindTextContent(domNode, allBindings);
+  }
+
+  if (!domNode.attributes) return; // this might be a text. Need to figure out what to do in that case
+
+  var attrs = domNode.attributes;
+  for (i = 0; i < attrs.length; ++i) {
+    bindDomAttribute(attrs[i], domNode, allBindings);
+  }
+}
+
+function bindDomAttribute(domAttribute, element, allBindings) {
+  var value = domAttribute.value;
+  if (!value) return; // unary attribute?
+
+  var modelNameMatch = value.match(BINDING_EXPR);
+  if (!modelNameMatch) return; // does not look like a binding
+
+  var attrName = domAttribute.localName;
+  var modelPropertyName = modelNameMatch[1];
+  var isSimpleValue = modelPropertyName.indexOf('.') < 0;
+
+  if (!isSimpleValue) throw new Error('simplesvg currently does not support nested bindings');
+
+  var propertyBindings = allBindings[modelPropertyName];
+  if (!propertyBindings) {
+    propertyBindings = allBindings[modelPropertyName] = [attributeSetter];
+  } else {
+    propertyBindings.push(attributeSetter);
+  }
+
+  function attributeSetter(model) {
+    element.setAttributeNS(null, attrName, model[modelPropertyName]);
+  }
+}
+function bindTextContent(element, allBindings) {
+  // todo reduce duplication
+  var value = element.nodeValue;
+  if (!value) return; // unary attribute?
+
+  var modelNameMatch = value.match(BINDING_EXPR);
+  if (!modelNameMatch) return; // does not look like a binding
+
+  var modelPropertyName = modelNameMatch[1];
+  var isSimpleValue = modelPropertyName.indexOf('.') < 0;
+
+  var propertyBindings = allBindings[modelPropertyName];
+  if (!propertyBindings) {
+    propertyBindings = allBindings[modelPropertyName] = [textSetter];
+  } else {
+    propertyBindings.push(textSetter);
+  }
+
+  function textSetter(model) {
+    element.nodeValue = model[modelPropertyName];
+  }
+}
+
+},{}],29:[function(require,module,exports){
+module.exports = createDomparser();
+
+function createDomparser() {
+  if (typeof DOMParser === 'undefined') {
+    return {
+      parseFromString: fail
+    };
+  }
+  return new DOMParser();
+}
+
+function fail() {
+  throw new Error('DOMParser is not supported by this platform. Please open issue here https://github.com/anvaka/simplesvg');
+}
+
+},{}],30:[function(require,module,exports){
+addEventListener.removeEventListener = removeEventListener
+addEventListener.addEventListener = addEventListener
+
+module.exports = addEventListener
+
+var Events = null
+
+function addEventListener(el, eventName, listener, useCapture) {
+  Events = Events || (
+    document.addEventListener ?
+    {add: stdAttach, rm: stdDetach} :
+    {add: oldIEAttach, rm: oldIEDetach}
+  )
+  
+  return Events.add(el, eventName, listener, useCapture)
+}
+
+function removeEventListener(el, eventName, listener, useCapture) {
+  Events = Events || (
+    document.addEventListener ?
+    {add: stdAttach, rm: stdDetach} :
+    {add: oldIEAttach, rm: oldIEDetach}
+  )
+  
+  return Events.rm(el, eventName, listener, useCapture)
+}
+
+function stdAttach(el, eventName, listener, useCapture) {
+  el.addEventListener(eventName, listener, useCapture)
+}
+
+function stdDetach(el, eventName, listener, useCapture) {
+  el.removeEventListener(eventName, listener, useCapture)
+}
+
+function oldIEAttach(el, eventName, listener, useCapture) {
+  if(useCapture) {
+    throw new Error('cannot useCapture in oldIE')
+  }
+
+  el.attachEvent('on' + eventName, listener)
+}
+
+function oldIEDetach(el, eventName, listener, useCapture) {
+  el.detachEvent('on' + eventName, listener)
+}
+
+},{}],31:[function(require,module,exports){
 /**
  * This module unifies handling of mouse whee event accross different browsers
  *
