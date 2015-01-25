@@ -63,7 +63,9 @@ function ngraphSvg(graph, settings) {
 
     placeLink: placeLink,
 
-    svgRoot: svgRoot
+    svgRoot: svgRoot,
+
+    resetStable: resetStable
   };
 
   require('ngraph.events')(api);
