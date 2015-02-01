@@ -1,27 +1,30 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 var graph = require('ngraph.graph')();
-var svg = require('simplesvg');
+var render = require('../../');
+var svg = render.svg;
 
 graph.addLink(0, 1);
 graph.addLink(2, 1);
 
-var renderer = require('../../')(graph, {
+var renderer = render(graph, {
   physics: {
     springLength: 60
   }
 });
-renderer.node(function(node) {
-  return svg("rect")
-    .attr("width", 42)
-    .attr("height", 42)
-    .attr("fill", "#00a2e8");
+
+renderer.node(function() {
+  return svg("rect", {
+    width: 42,
+    height: 42,
+    fill: "#00a2e8"
+  });
 }).placeNode(function nodePositionCallback(nodeUI, pos) {
   nodeUI.attr("x", pos.x - 21).attr("y", pos.y - 21);
 });
 
 renderer.run();
 
-},{"../../":2,"ngraph.graph":23,"simplesvg":25}],2:[function(require,module,exports){
+},{"../../":2,"ngraph.graph":23}],2:[function(require,module,exports){
 var svg = require('simplesvg');
 var hammer = require('hammerjs');
 
@@ -430,10 +433,11 @@ exports.linkBuilder = linkBuilder;
 exports.linkPositionCallback = linkPositionCallback;
 
 function nodeBuilder(node) {
-  return svg("rect")
-    .attr("width", 10)
-    .attr("height", 10)
-    .attr("fill", "#00a2e8");
+  return svg("rect", {
+    width: 10,
+    height: 10,
+    fill:  "#00a2e8"
+  });
 }
 
 function nodePositionCallback(nodeUI, pos) {
@@ -441,7 +445,9 @@ function nodePositionCallback(nodeUI, pos) {
 }
 
 function linkBuilder(linkUI, pos) {
-  return svg("line").attr("stroke", "#999");
+  return svg("line", {
+    stroke:  "#999"
+  });
 }
 
 function linkPositionCallback(linkUI, fromPos, toPos) {
@@ -4986,7 +4992,27 @@ var domEvents = require('add-event-listener');
 var svgns = "http://www.w3.org/2000/svg";
 var xlinkns = "http://www.w3.org/1999/xlink";
 
-function svg(element) {
+function svg(element, attrBag) {
+  var svgElement = augment(element);
+  if (attrBag === undefined) {
+    return svgElement;
+  }
+
+  var attributes = Object.keys(attrBag);
+  for (var i = 0; i < attributes.length; ++i) {
+    var attributeName = attributes[i];
+    var value = attrBag[attributeName];
+    if (attributeName === 'link') {
+      svgElement.link(value);
+    } else {
+      svgElement.attr(attributeName, value);
+    }
+  }
+
+  return svgElement;
+}
+
+function augment(element) {
   var svgElement = element;
 
   if (typeof element === "string") {
@@ -5001,6 +5027,7 @@ function svg(element) {
   svgElement.attr = attr;
   svgElement.append = append;
   svgElement.link = link;
+  svgElement.text = text;
 
   // add easy eventing
   svgElement.on = on;
@@ -5014,6 +5041,7 @@ function svg(element) {
   function dataSource(model) {
     if (!compiledTempalte) compiledTempalte = compileTemplate(svgElement);
     compiledTempalte.link(model);
+    return svgElement;
   }
 
   function on(name, cb, useCapture) {
@@ -5054,6 +5082,14 @@ function svg(element) {
     }
 
     return svgElement.getAttributeNS(xlinkns, "xlink:href");
+  }
+
+  function text(textContent) {
+    if (textContent !== undefined) {
+        svgElement.textContent = textContent;
+        return svgElement;
+    }
+    return svgElement.textContent;
   }
 }
 

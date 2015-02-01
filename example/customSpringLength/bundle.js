@@ -452,10 +452,11 @@ exports.linkBuilder = linkBuilder;
 exports.linkPositionCallback = linkPositionCallback;
 
 function nodeBuilder(node) {
-  return svg("rect")
-    .attr("width", 10)
-    .attr("height", 10)
-    .attr("fill", "#00a2e8");
+  return svg("rect", {
+    width: 10,
+    height: 10,
+    fill:  "#00a2e8"
+  });
 }
 
 function nodePositionCallback(nodeUI, pos) {
@@ -463,7 +464,9 @@ function nodePositionCallback(nodeUI, pos) {
 }
 
 function linkBuilder(linkUI, pos) {
-  return svg("line").attr("stroke", "#999");
+  return svg("line", {
+    stroke:  "#999"
+  });
 }
 
 function linkPositionCallback(linkUI, fromPos, toPos) {
@@ -5008,7 +5011,27 @@ var domEvents = require('add-event-listener');
 var svgns = "http://www.w3.org/2000/svg";
 var xlinkns = "http://www.w3.org/1999/xlink";
 
-function svg(element) {
+function svg(element, attrBag) {
+  var svgElement = augment(element);
+  if (attrBag === undefined) {
+    return svgElement;
+  }
+
+  var attributes = Object.keys(attrBag);
+  for (var i = 0; i < attributes.length; ++i) {
+    var attributeName = attributes[i];
+    var value = attrBag[attributeName];
+    if (attributeName === 'link') {
+      svgElement.link(value);
+    } else {
+      svgElement.attr(attributeName, value);
+    }
+  }
+
+  return svgElement;
+}
+
+function augment(element) {
   var svgElement = element;
 
   if (typeof element === "string") {
@@ -5023,6 +5046,7 @@ function svg(element) {
   svgElement.attr = attr;
   svgElement.append = append;
   svgElement.link = link;
+  svgElement.text = text;
 
   // add easy eventing
   svgElement.on = on;
@@ -5036,6 +5060,7 @@ function svg(element) {
   function dataSource(model) {
     if (!compiledTempalte) compiledTempalte = compileTemplate(svgElement);
     compiledTempalte.link(model);
+    return svgElement;
   }
 
   function on(name, cb, useCapture) {
@@ -5076,6 +5101,14 @@ function svg(element) {
     }
 
     return svgElement.getAttributeNS(xlinkns, "xlink:href");
+  }
+
+  function text(textContent) {
+    if (textContent !== undefined) {
+        svgElement.textContent = textContent;
+        return svgElement;
+    }
+    return svgElement.textContent;
   }
 }
 
