@@ -10,7 +10,7 @@ ngraphSvg.svg = svg; // let consumers use this directly
 function ngraphSvg(graph, settings) {
   settings = settings || {};
 
-  var layout = require('./lib/defaultLayout.js')(graph, settings);
+  var layout = settings.layout ? settings.layout : require('./lib/defaultLayout.js')(graph, settings);
 
   var container = settings.container || document.body;
 
