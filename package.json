@@ -21,12 +21,12 @@
   "dependencies": {
     "hammerjs": "^2.0.2",
     "ngraph.events": "0.0.3",
-    "ngraph.forcelayout": "0.0.15",
+    "ngraph.forcelayout": "0.0.20",
     "simplesvg": "0.0.10",
     "ngraph.merge": "0.0.1",
-    "wheel": "0.0.0"
+    "wheel": "0.0.1"
   },
   "devDependencies": {
-    "ngraph.graph": "0.0.8"
+    "ngraph.graph": "0.0.13"
   }
 }
