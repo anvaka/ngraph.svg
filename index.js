@@ -12,6 +12,8 @@ function ngraphSvg(graph, settings) {
 
   var layout = require('./lib/defaultLayout.js')(graph, settings);
 
+  var scrollSpeed = typeof settings.scrollSpeed === 'number' ?
+      settings.scrollSpeed : 0.1;
   var container = settings.container || document.body;
 
   var isStable = false;
@@ -33,8 +35,8 @@ function ngraphSvg(graph, settings) {
   var fromX = 0, fromY = 0;
   var screenPinchX, screenPinchY, lastScale;
   var cachedPos = { x: 0, y: 0 },
-      cachedFromPos = { x: 0, y: 0 },
-      cachedToPos = { x: 0, y: 0 };
+    cachedFromPos = { x: 0, y: 0 },
+    cachedToPos = { x: 0, y: 0 };
 
   var defaultUI = require('./lib/defaultUI.js');
   var nodeBuilder = defaultUI.nodeBuilder,
@@ -253,7 +255,7 @@ function ngraphSvg(graph, settings) {
   function onWheel(e) {
     var isZoomIn = e.deltaY < 0;
     var direction = isZoomIn ? 1 : -1;
-    var factor = (1 + direction * 0.1);
+    var factor = (1 + direction * scrollSpeed);
     var x = e.offsetX === undefined ? e.layerX : e.offsetX;
     var y = e.offsetY === undefined ? e.layerY : e.offsetY;
     zoomTo(x, y, factor);
