@@ -1,10 +1,11 @@
 {
   "name": "ngraph.svg",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Svg based graph rendering",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "demo": "browserify example/basic/index.js > example/basic/bundle.js && browserify example/customNode/index.js > example/customNode/bundle.js && browserify example/customSpringLength/index.js > example/customSpringLength/bundle.js"
   },
   "keywords": [
     "svg",
@@ -20,13 +21,13 @@
   },
   "dependencies": {
     "hammerjs": "^2.0.2",
-    "ngraph.events": "0.0.3",
-    "ngraph.forcelayout": "0.0.22",
-    "simplesvg": "0.0.10",
+    "ngraph.events": "1.2.1",
+    "ngraph.forcelayout": "3.3.0",
+    "simplesvg": "0.1.0",
     "ngraph.merge": "0.0.1",
     "wheel": "0.0.1"
   },
   "devDependencies": {
-    "ngraph.graph": "0.0.13"
+    "ngraph.graph": "20.0.0"
   }
 }

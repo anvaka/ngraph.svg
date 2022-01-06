@@ -97,7 +97,7 @@ function ngraphSvg(graph, settings) {
     requestAnimationFrame(animationLoop);
 
     if (!isStable) {
-      isStable = layout.step();
+      layout.step();
       renderOneFrame();
     }
   }

@@ -15,7 +15,7 @@ renderer.node(function() {
   return svg("rect", {
     width: 42,
     height: 42,
-    fill: "#00a2e8"
+    fill: "#88a2e8"
   });
 }).placeNode(function nodePositionCallback(nodeUI, pos) {
   nodeUI.attr("x", pos.x - 21).attr("y", pos.y - 21);
