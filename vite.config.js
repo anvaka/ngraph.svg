@@ -3,8 +3,10 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     lib: {
-  entry: 'index.js',
+      entry: 'index.js',
       name: 'ngraphSvg',
+      // ES/UMD build for bundler consumers
+      formats: ['es', 'umd'],
       fileName: (format) => `ngraph.svg.${format}.js`,
     },
     rollupOptions: {

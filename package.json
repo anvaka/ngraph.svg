@@ -15,7 +15,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "server": "vite",
-    "build": "vite build",
+  "build": "vite build",
+  "build:standalone": "vite build --config vite.standalone.config.js",
+  "build:all": "npm run build && npm run build:standalone",
     "preview": "vite preview"
   },
   "keywords": [

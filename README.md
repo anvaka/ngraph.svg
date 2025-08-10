@@ -31,6 +31,24 @@ const renderer = createRenderer(graph);
 renderer.run();
 ```
 
+## Standalone browser build
+
+If you prefer a single script without bundlers, build the standalone bundle and include it directly in the browser. It exposes a global `ngraphSvg`.
+
+```html
+<!-- After running: npm run build:standalone -->
+<script src="./dist/ngraph.svg.standalone.js"></script>
+<script type="module">
+	import createGraph from 'https://unpkg.com/ngraph.graph@20?module';
+	const graph = createGraph();
+	graph.addLink('a', 'b');
+	const renderer = ngraphSvg(graph);
+	renderer.run();
+<\/script>
+```
+
+Note: The standalone build bundles this library's dependencies, but you still need to provide a graph instance (e.g. from `ngraph.graph`).
+
 # license
 
 MIT
