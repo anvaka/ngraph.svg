@@ -1,9 +1,11 @@
-var graph = require('ngraph.graph')();
-var render = require('../../');
-var svg = render.svg;
+import createGraph from 'ngraph.graph';
+import render from '../../index.js';
 
+const graph = createGraph();
 graph.addLink(0, 1);
 graph.addLink(2, 1);
+
+const { svg } = render;
 
 var renderer = render(graph, {
   physics: {

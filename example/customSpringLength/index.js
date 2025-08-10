@@ -1,8 +1,10 @@
-var graph = require('ngraph.graph')();
+import createGraph from 'ngraph.graph';
+const graph = createGraph();
 graph.addLink(1, 2);
 graph.addLink(2, 3);
 
-var renderer = require('../../')(graph, {
+import createRenderer from '../../index.js';
+var renderer = createRenderer(graph, {
     physics: {
       // this will be the default length:
       springLength: 400,
