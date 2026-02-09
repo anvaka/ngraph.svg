@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chinese Vocabulary Graph</title>
+  <link rel="stylesheet" href="./chinese-vocab.css">
+</head>
+<body>
+  <div id="container"></div>
+
+  <div class="controls">
+    <div class="control-group">
+      <label for="categorySelect">Category</label>
+      <select id="categorySelect">
+        <option value="动物">动物 (Animals)</option>
+        <option value="食物">食物 (Food)</option>
+        <option value="身体部位">身体部位 (Body Parts)</option>
+        <option value="交通工具">交通工具 (Vehicles)</option>
+        <option value="工具">工具 (Tools)</option>
+        <option value="时间">时间 (Time)</option>
+        <option value="地点">地点 (Places)</option>
+        <option value="人物">人物 (People)</option>
+        <option value="活动">活动 (Activities)</option>
+        <option value="国家">国家 (Countries)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label for="depthSlider">Depth: <span id="depthValue">3</span></label>
+      <input type="range" id="depthSlider" min="1" max="5" value="3">
+    </div>
+    <button id="btnReset">Reset View</button>
+    <button id="btnToggleLayout">Pause Layout</button>
+  </div>
+
+  <div class="info-panel">
+    <h3>Chinese Vocabulary Graph</h3>
+    <div class="stats">
+      <div class="stat">
+        <span>Nodes:</span>
+        <span id="nodeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Edges:</span>
+        <span id="edgeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Zoom:</span>
+        <span id="zoomLevel">1.00x</span>
+      </div>
+      <div class="stat">
+        <span>Layout:</span>
+        <span id="layoutStatus">Running</span>
+      </div>
+    </div>
+    <p class="help-text">
+      Scroll to zoom &bull; Drag to pan<br>
+      Zoom in to see pinyin and definitions
+    </p>
+  </div>
+
+  <div id="wordDetail" class="word-detail hidden">
+    <button class="close-btn" id="closeDetail">&times;</button>
+    <div class="word-hanzi" id="detailHanzi">-</div>
+    <div class="word-pinyin" id="detailPinyin">-</div>
+    <div class="word-definition" id="detailDefinition">-</div>
+    <div class="word-hsk" id="detailHsk">-</div>
+  </div>
+
+  <script type="module" src="./chinese-vocab.js"></script>
+</body>
+</html>

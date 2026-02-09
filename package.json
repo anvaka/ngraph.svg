@@ -1,46 +1,40 @@
 {
   "name": "ngraph.svg",
-  "version": "0.1.0",
-  "description": "Svg based graph rendering",
+  "version": "0.9.0",
+  "description": "SVG-based graph visualization library with adaptive rendering",
   "type": "module",
-  "main": "index.js",
-  "module": "index.js",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
   "exports": {
     ".": {
-      "import": "./index.js",
-      "default": "./index.js"
+      "import": "./src/index.js",
+      "default": "./src/index.js"
     }
   },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
-    "server": "vite",
     "build": "vite build",
-    "build:standalone": "vite build --config vite.standalone.config.js",
-    "build:all": "npm run build && npm run build:standalone",
     "preview": "vite preview"
   },
-  "keywords": [
-    "svg",
-    "graph",
-    "vivagraph",
-    "ngraph"
-  ],
-  "author": "Andrei Kashcha",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/anvaka/ngraph.svg"
-  },
   "dependencies": {
-    "hammerjs": "^2.0.8",
-    "ngraph.events": "^1.2.1",
-    "ngraph.forcelayout": "^3.3.0",
-    "simplesvg": "^0.1.0",
-    "ngraph.merge": "^0.0.1"
+    "ngraph.forcelayout": "^3.3.1",
+    "ngraph.graph": "^20.1.1",
+    "rbush": "^3.0.1"
   },
   "devDependencies": {
-    "ngraph.graph": "^20.0.0",
-    "vite": "^5.0.0"
-  }
+    "vite": "^6.0.11"
+  },
+  "keywords": [
+    "graph",
+    "visualization",
+    "svg",
+    "ngraph",
+    "adaptive"
+  ],
+  "author": "",
+  "license": "MIT"
 }

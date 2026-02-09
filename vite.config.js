@@ -1,34 +1,23 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
   build: {
     lib: {
-      entry: 'index.js',
+      entry: resolve(__dirname, 'src/index.js'),
       name: 'ngraphSvg',
-      // ES/UMD build for bundler consumers
-      formats: ['es', 'umd'],
-      fileName: (format) => `ngraph.svg.${format}.js`,
+      fileName: 'ngraph.svg'
     },
     rollupOptions: {
-      external: [
-        'ngraph.events',
-        'ngraph.forcelayout',
-        'ngraph.merge',
-        'simplesvg',
-        'hammerjs'
-      ],
+      external: ['ngraph.graph', 'ngraph.forcelayout'],
       output: {
         globals: {
-          'ngraph.events': 'ngraphEvents',
-          'ngraph.forcelayout': 'ngraphForceLayout',
-          'ngraph.merge': 'ngraphMerge',
-          'simplesvg': 'simplesvg',
-          'hammerjs': 'Hammer'
+          'ngraph.graph': 'createGraph',
+          'ngraph.forcelayout': 'createLayout'
         }
       }
     }
   },
-  server: {
-    open: '/example/basic/index.html'
-  }
+  root: 'demo',
+  publicDir: false
 });
