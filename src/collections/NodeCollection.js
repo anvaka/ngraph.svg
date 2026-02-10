@@ -1,5 +1,6 @@
 import RBush from 'rbush';
 
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -352,6 +353,11 @@ export default class NodeCollection {
     this._reusableCtx = { zoom: 1 };
     this._reusableCtxKeys = [];
 
+    // Collision detection throttle: only recompute every N ms during layout
+    // (positions change every frame, but collision results are stable for longer)
+    this._collisionInterval = options.collisionInterval ?? 200; // ms
+    this._lastCollisionTime = 0;
+
     // Graph binding
     this._graph = options.graph || null;
     this._graphChangeListener = null;
@@ -401,6 +407,9 @@ export default class NodeCollection {
       _currentLevel: -1,
       _inDOM: false,
       _collection: this,
+      _stateVersion: 0,
+      _renderedLevel: -1,
+      _renderedStateVersion: -1,
     };
 
     this._nodes[index] = node;
@@ -507,11 +516,14 @@ export default class NodeCollection {
     }
 
     const node = this._nodeMap.get(id);
-    if (node && node._element) {
-      if (value) {
-        node._element.classList.add(key);
-      } else {
-        node._element.classList.remove(key);
+    if (node) {
+      node._stateVersion++;
+      if (node._element) {
+        if (value) {
+          node._element.classList.add(key);
+        } else {
+          node._element.classList.remove(key);
+        }
       }
     }
   }
@@ -535,8 +547,11 @@ export default class NodeCollection {
         if (stateMap.size === 0) this._state.delete(id);
 
         const node = this._nodeMap.get(id);
-        if (node && node._element) {
-          node._element.classList.remove(key);
+        if (node) {
+          node._stateVersion++;
+          if (node._element) {
+            node._element.classList.remove(key);
+          }
         }
       }
     }
@@ -750,9 +765,13 @@ export default class NodeCollection {
     const scaleChanged = newScale !== this._lastScale;
     this._lastScale = newScale;
 
-    // Only recompute collisions when zoom or positions changed
-    if (scaleChanged || this._positionsDirty) {
+    // Recompute collisions when zoom changes (always) or positions changed (throttled).
+    // During layout, positions change every frame but collision results are stable
+    // for much longer — throttle to avoid O(V log V) work on every frame.
+    const now = performance.now();
+    if (scaleChanged || (this._positionsDirty && now - this._lastCollisionTime >= this._collisionInterval)) {
       this._computeResolvedLevels(drawContext);
+      this._lastCollisionTime = now;
     }
 
     if (this._positionsDirty) {
@@ -791,9 +810,6 @@ export default class NodeCollection {
     // For each level with importance, we need collision detection
     const candidateLevel = this._getCandidateLevelIndex(zoom);
 
-    // Clear collision trees
-    this._collisionTrees.clear();
-
     // Collect visible nodes
     const visibleNodes = [];
     for (const node of this._nodes) {
@@ -824,9 +840,14 @@ export default class NodeCollection {
         break; // All nodes assigned
       }
 
-      // Importance-gated level: collision detection
-      const tree = new RBush();
-      this._collisionTrees.set(li, tree);
+      // Importance-gated level: collision detection (reuse pooled tree)
+      let tree = this._collisionTrees.get(li);
+      if (!tree) {
+        tree = new RBush();
+        this._collisionTrees.set(li, tree);
+      } else {
+        tree.clear();
+      }
 
       // Collect unresolved nodes with importance for this level
       const candidates = [];
@@ -1011,14 +1032,10 @@ export default class NodeCollection {
     if (this._levels.length === 0) return;
 
     const resolvedLevel = this._resolvedLevels.get(node.id) ?? 0;
-    const prevResolved = this._prevResolvedLevels.get(node.id) ?? -1;
-    const levelChanged = resolvedLevel !== prevResolved;
 
-    // Always re-render because state (highlighted, dimmed) may have changed
-    // and property functions depend on ctx
-    if (levelChanged || node._currentLevel !== resolvedLevel) {
-      // Check for transition
-      if (node._currentLevel >= 0 && node._currentLevel !== resolvedLevel) {
+    if (node._currentLevel !== resolvedLevel) {
+      // Level changed — start transition if node was previously rendered
+      if (node._currentLevel >= 0) {
         this._transitions.set(node.id, {
           fromLevel: node._currentLevel,
           toLevel: resolvedLevel,
@@ -1028,7 +1045,16 @@ export default class NodeCollection {
       node._currentLevel = resolvedLevel;
     }
 
+    // Skip re-render if level and state haven't changed and no transition is active
+    if (!this._transitions.has(node.id) &&
+        node._currentLevel === node._renderedLevel &&
+        node._stateVersion === node._renderedStateVersion) {
+      return;
+    }
+
     this._renderNode(node);
+    node._renderedLevel = node._currentLevel;
+    node._renderedStateVersion = node._stateVersion;
   }
 
   /**

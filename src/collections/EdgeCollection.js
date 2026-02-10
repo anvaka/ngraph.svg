@@ -1,6 +1,7 @@
 import RBush from 'rbush';
 import { intersectShape } from '../intersectShape.js';
 
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -66,6 +67,7 @@ export default class EdgeCollection {
 
     // Model-driven state: edgeId -> Map<string, boolean>
     this._state = new Map();
+    this._stateVersion = 0;
 
     // Arrow marker sizing (screen pixels)
     this._arrowLength = options.arrowLength || 10;
@@ -215,6 +217,7 @@ export default class EdgeCollection {
         if (stateMap.size === 0) this._state.delete(id);
       }
     }
+    this._stateVersion++;
 
     const edge = this._edgeMap.get(id);
     if (edge && edge._element) {
@@ -233,10 +236,12 @@ export default class EdgeCollection {
   }
 
   clearState(key) {
+    let changed = false;
     for (const [id, stateMap] of this._state) {
       if (stateMap.has(key)) {
         stateMap.delete(key);
         if (stateMap.size === 0) this._state.delete(id);
+        changed = true;
 
         const edge = this._edgeMap.get(id);
         if (edge && edge._element) {
@@ -244,6 +249,7 @@ export default class EdgeCollection {
         }
       }
     }
+    if (changed) this._stateVersion++;
   }
 
   _reapplyState(edge) {
@@ -594,6 +600,11 @@ export default class EdgeCollection {
    * Resolves color, width, opacity with (data, ctx).
    */
   _updateEdgeStyle(edge) {
+    if (edge._renderedStateVersion === this._stateVersion &&
+        edge._renderedZoom === this._lastScale) {
+      return;
+    }
+
     const ctx = this._buildCtx(edge.id);
     const color = resolve(this._colorProp, edge.data, ctx);
     const width = resolve(this._widthProp, edge.data, ctx);
@@ -602,6 +613,9 @@ export default class EdgeCollection {
     edge._element.setAttribute('stroke', color);
     edge._element.setAttribute('stroke-width', width);
     edge._element.setAttribute('opacity', opacity);
+
+    edge._renderedStateVersion = this._stateVersion;
+    edge._renderedZoom = this._lastScale;
   }
 
   // ── Arrow marker management ─────────────────────────────────────────

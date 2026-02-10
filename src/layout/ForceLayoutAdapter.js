@@ -14,6 +14,7 @@
 import { computeLayers } from './computeLayers.js';
 import { computeStressedNodes } from './computeStressedNodes.js';
 
+
 // Phase constants
 const PHASE_CORE_LAYOUT = 'CORE_LAYOUT';
 const PHASE_LAYER_SETTLE = 'LAYER_SETTLE';
