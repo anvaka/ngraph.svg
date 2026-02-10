@@ -545,6 +545,17 @@ export default class NodeCollection {
   }
 
   /**
+   * Force re-render of all nodes on the next frame.
+   * Useful when external data used by property callbacks (e.g. fontSize)
+   * has changed without any level or state change.
+   */
+  invalidateContent() {
+    for (const node of this._nodeMap.values()) {
+      node._stateVersion++;
+    }
+  }
+
+  /**
    * Remove a state key from ALL nodes and sync CSS classes
    */
   clearState(key) {

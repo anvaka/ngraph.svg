@@ -27,6 +27,7 @@ export { default as DrawContext } from './DrawContext.js';
 // Collections - Batched rendering for nodes and edges
 export { default as NodeCollection } from './collections/NodeCollection.js';
 export { default as EdgeCollection } from './collections/EdgeCollection.js';
+export { default as CanvasEdgeCollection } from './collections/CanvasEdgeCollection.js';
 
 // Layout - Force-directed graph layout integration
 export { default as ForceLayoutAdapter } from './layout/ForceLayoutAdapter.js';

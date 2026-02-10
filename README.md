@@ -184,6 +184,39 @@ const edges = new EdgeCollection({
 - `clear()` — remove all edges
 - `dispose()` — clean up resources
 
+### CanvasEdgeCollection
+
+Canvas-based drop-in replacement for `EdgeCollection`. Renders edges on an HTML Canvas positioned behind the SVG, which is significantly faster on mobile for large edge counts (10K+).
+
+```js
+import { CanvasEdgeCollection } from 'ngraph.svg';
+
+const edges = new CanvasEdgeCollection({
+  container,                        // DOM element (same one passed to createScene)
+  graph,                            // ngraph instance (auto-binds edges)
+  nodeCollection: nodeCol,          // for directed arrow endpoint calculation
+  directed: true,                   // draw arrowheads on canvas
+  color: '#666',                    // literal, d => val, or (d, ctx) => val
+  width: 1,
+  opacity: 0.5,
+  arrowLength: 10,                  // screen pixels
+  arrowWidth: 5,                    // screen pixels
+});
+```
+
+**Differences from EdgeCollection:**
+- Requires a `container` option (the same DOM element passed to `createScene`)
+- Renders to a `<canvas>` element behind the SVG instead of SVG `<path>` elements
+- No per-edge DOM elements — style changes don't add CSS classes
+- `getRoot()` returns `null` (no SVG group needed)
+- Same public API otherwise: `add`, `remove`, `get`, `setEndpoints`, `syncPositions`, `setState`, `clearState`, `beginBatch`/`endBatch`, `forEach`, `count`, `clear`, `dispose`
+
+**Performance strategy:**
+- Full canvas redraw each frame (negligible cost for 10K+ lines)
+- Style batching: groups edges by (color, width, opacity) tuple
+- Draws in screen space with fixed lineWidth for non-scaling stroke
+- Viewport culling via R-tree spatial index
+
 ### Property Functions
 
 Every visual property (fill, radius, fontSize, opacity, etc.) can be:

@@ -2,7 +2,7 @@ import createGraph from 'ngraph.graph';
 import {
   createScene,
   NodeCollection,
-  EdgeCollection,
+  CanvasEdgeCollection,
   ForceLayoutAdapter,
   removeOverlaps
 } from '../src/index.js';
@@ -62,9 +62,10 @@ async function init() {
     });
 
     // Create collections
-    edges = new EdgeCollection({
+    edges = new CanvasEdgeCollection({
+      container,
       color: '#c7c7cc',
-      width: 0.5,
+      width: 1,
       opacity: 0.4
     });
 

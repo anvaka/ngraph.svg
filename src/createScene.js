@@ -20,6 +20,7 @@ export default function createScene(container, options = {}) {
 
   // Create SVG root element
   const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.style.position = 'relative';
   svg.style.width = '100%';
   svg.style.height = '100%';
   svg.style.display = 'block';
@@ -154,7 +155,8 @@ export default function createScene(container, options = {}) {
      */
     addCollection(collection) {
       collections.push(collection);
-      transformGroup.appendChild(collection.getRoot());
+      const root = collection.getRoot();
+      if (root) transformGroup.appendChild(root);
       requestRender();
       return collection;
     },
@@ -167,7 +169,7 @@ export default function createScene(container, options = {}) {
       if (idx !== -1) {
         collections.splice(idx, 1);
         const root = collection.getRoot();
-        if (root.parentNode) {
+        if (root && root.parentNode) {
           root.parentNode.removeChild(root);
         }
         requestRender();
