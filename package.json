@@ -16,12 +16,14 @@
     "src"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --config vite.demo.config.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:demo": "vite build --config vite.demo.config.js && cp demo/hypernym-dag-v2.json docs/",
+    "preview": "vite preview --config vite.demo.config.js"
   },
   "dependencies": {
     "ngraph.forcelayout": "^3.3.1",
+    "ngraph.generators": "^21.0.0",
     "ngraph.graph": "^20.1.1",
     "rbush": "^3.0.1"
   },

@@ -337,6 +337,8 @@ export default class NodeCollection {
     // Render state
     this._lastDrawContext = null;
     this._lastScale = 1;
+    this._lastCollisionZoom = 0;
+    this._lastCandidateLevel = undefined;
 
     // Model-driven state: nodeId -> Map<string, boolean>
     this._state = new Map();
@@ -357,6 +359,11 @@ export default class NodeCollection {
     // (positions change every frame, but collision results are stable for longer)
     this._collisionInterval = options.collisionInterval ?? 200; // ms
     this._lastCollisionTime = 0;
+
+    // Preallocated arrays for collision detection (avoid GC pressure)
+    this._collisionNodes = [];    // reused each _computeResolvedLevels call
+    this._collisionCandidates = []; // reused per level
+    this._collisionStable = [];     // reused per level (preserveExisting mode)
 
     // Graph binding
     this._graph = options.graph || null;
@@ -765,13 +772,34 @@ export default class NodeCollection {
     const scaleChanged = newScale !== this._lastScale;
     this._lastScale = newScale;
 
-    // Recompute collisions when zoom changes (always) or positions changed (throttled).
-    // During layout, positions change every frame but collision results are stable
-    // for much longer — throttle to avoid O(V log V) work on every frame.
+    // Recompute collisions when:
+    // 1. Zoom crossed a level boundary (new levels became eligible)
+    // 2. Zoom changed by >20% from last collision computation
+    // 3. Positions changed (throttled during layout)
+    // Avoid recomputing on every zoom tick — the greedy collision algorithm
+    // produces cascade effects where small screen-position changes cause
+    // nodes to gain/lose levels in chain reactions.
     const now = performance.now();
-    if (scaleChanged || (this._positionsDirty && now - this._lastCollisionTime >= this._collisionInterval)) {
-      this._computeResolvedLevels(drawContext);
+    const newCandidateLevel = this._getCandidateLevelIndex(newScale);
+    const levelBoundaryCrossed = this._lastCandidateLevel !== undefined &&
+      newCandidateLevel !== this._lastCandidateLevel;
+    this._lastCandidateLevel = newCandidateLevel;
+
+    const zoomRatio = this._lastCollisionZoom > 0 ? newScale / this._lastCollisionZoom : Infinity;
+    const zoomIn = zoomRatio > 1.2;
+    const zoomOut = zoomRatio < 0.83;
+
+    if (levelBoundaryCrossed || zoomOut ||
+        (this._positionsDirty && now - this._lastCollisionTime >= this._collisionInterval)) {
+      // Fresh recompute: level boundary, zoom-out, or position changes
+      this._computeResolvedLevels(drawContext, false);
       this._lastCollisionTime = now;
+      this._lastCollisionZoom = newScale;
+    } else if (zoomIn) {
+      // Accumulative: preserve existing assignments, only add new promotions
+      this._computeResolvedLevels(drawContext, true);
+      this._lastCollisionTime = now;
+      this._lastCollisionZoom = newScale;
     }
 
     if (this._positionsDirty) {
@@ -795,7 +823,7 @@ export default class NodeCollection {
    * 2. If level has importance, check collision with more important nodes
    * 3. On collision, fall back to previous level
    */
-  _computeResolvedLevels(drawContext) {
+  _computeResolvedLevels(drawContext, preserveExisting = false) {
     const zoom = this._lastScale;
     const levels = this._levels;
     if (levels.length === 0) return;
@@ -806,41 +834,45 @@ export default class NodeCollection {
     this._resolvedLevels = temp;
     this._resolvedLevels.clear();
 
-    // Find candidate level for current zoom (same for all nodes — it's zoom-based)
-    // For each level with importance, we need collision detection
     const candidateLevel = this._getCandidateLevelIndex(zoom);
 
-    // Collect visible nodes
-    const visibleNodes = [];
-    for (const node of this._nodes) {
+    // Collect visible nodes into pooled array (no allocation after warmup)
+    const collisionNodes = this._collisionNodes;
+    collisionNodes.length = 0;
+    for (let i = 0; i < this._nodes.length; i++) {
+      const node = this._nodes[i];
       if (!node || !node.visible) continue;
-
-      const visibilityRadius = Math.max(node.size, 50 / this._lastScale);
+      const visibilityRadius = Math.max(node.size, 50 / zoom);
       if (!drawContext.isVisible(node.x, node.y, visibilityRadius)) continue;
-
-      visibleNodes.push(node);
+      collisionNodes.push(node);
     }
 
-    // Process levels from highest to lowest (candidate down to 0)
-    // For each importance-gated level, sort nodes by importance and do collision
+    const contentScale = Math.min(1, this._maxScale / zoom);
+    const candidates = this._collisionCandidates;
+    const stableList = this._collisionStable;
+
+    // Reusable bbox object — only used transiently for tree.collides() checks.
+    // tree.insert() copies the values internally, so reuse is safe for collides().
+    // For insert(), we still allocate since RBush stores the reference.
+    const testBbox = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+
     for (let li = candidateLevel; li >= 0; li--) {
       const level = levels[li];
 
-      // Check zoom range for this level
       if (zoom < level.minZoom) continue;
       if (level.maxZoom !== undefined && zoom >= level.maxZoom) continue;
 
       if (!level.importance) {
-        // No importance gating — all remaining unresolved nodes go to this level
-        for (const node of visibleNodes) {
+        for (let i = 0; i < collisionNodes.length; i++) {
+          const node = collisionNodes[i];
           if (!this._resolvedLevels.has(node.id)) {
             this._resolvedLevels.set(node.id, li);
           }
         }
-        break; // All nodes assigned
+        break;
       }
 
-      // Importance-gated level: collision detection (reuse pooled tree)
+      // Importance-gated level: collision detection
       let tree = this._collisionTrees.get(li);
       if (!tree) {
         tree = new RBush();
@@ -849,49 +881,63 @@ export default class NodeCollection {
         tree.clear();
       }
 
-      // Collect unresolved nodes with importance for this level
-      const candidates = [];
-      for (const node of visibleNodes) {
-        if (this._resolvedLevels.has(node.id)) continue;
-        const importance = resolve(level.importance, node.data, this._buildCtx(node.id));
-        candidates.push({ node, importance: importance || 0 });
+      // In preserveExisting mode (zoom-in), re-insert nodes that were at this
+      // level previously, sorted by importance. This prevents cascade effects
+      // where newly-promoted nodes displace existing ones. Collision is still
+      // checked among stable nodes to handle zoom-dependent bound changes
+      // (e.g. `visible` thresholds on layers).
+      if (preserveExisting) {
+        stableList.length = 0;
+        for (let i = 0; i < collisionNodes.length; i++) {
+          const node = collisionNodes[i];
+          if (this._resolvedLevels.has(node.id)) continue;
+          if (this._prevResolvedLevels.get(node.id) !== li) continue;
+          const importance = resolve(level.importance, node.data, this._buildCtx(node.id));
+          stableList.push(node, importance || 0);
+        }
+        // Sort pairs [node, importance, node, importance, ...] by importance desc
+        this._sortPairs(stableList);
+
+        for (let i = 0; i < stableList.length; i += 2) {
+          const node = stableList[i];
+          this._fillBbox(testBbox, node, level, contentScale, zoom, drawContext);
+          if (!tree.collides(testBbox)) {
+            tree.insert({ minX: testBbox.minX, minY: testBbox.minY,
+                          maxX: testBbox.maxX, maxY: testBbox.maxY });
+            this._resolvedLevels.set(node.id, li);
+          }
+        }
       }
 
-      // Sort by importance descending
-      candidates.sort((a, b) => b.importance - a.importance);
+      // Process remaining unresolved nodes by importance
+      candidates.length = 0;
+      for (let i = 0; i < collisionNodes.length; i++) {
+        const node = collisionNodes[i];
+        if (this._resolvedLevels.has(node.id)) continue;
+        const importance = resolve(level.importance, node.data, this._buildCtx(node.id));
+        candidates.push(node, importance || 0);
+      }
+      this._sortPairs(candidates);
 
-      const contentScale = Math.min(1, this._maxScale / this._lastScale);
-
-      for (const { node } of candidates) {
-        const ctx = this._buildCtx(node.id);
-        const bounds = computeLevelBounds(level, node.data, ctx);
-        const screenPos = drawContext.sceneToScreen(node.x, node.y);
-
-        // Scale bounds by contentScale (since content is counter-scaled)
-        const hw = (bounds.width * contentScale * zoom) / 2;
-        const hh = (bounds.height * contentScale * zoom) / 2;
-
-        const bbox = {
-          minX: screenPos.x - hw,
-          minY: screenPos.y - hh,
-          maxX: screenPos.x + hw,
-          maxY: screenPos.y + hh,
-        };
-
-        if (!tree.collides(bbox)) {
-          tree.insert(bbox);
+      for (let i = 0; i < candidates.length; i += 2) {
+        const node = candidates[i];
+        this._fillBbox(testBbox, node, level, contentScale, zoom, drawContext);
+        if (!tree.collides(testBbox)) {
+          tree.insert({ minX: testBbox.minX, minY: testBbox.minY,
+                        maxX: testBbox.maxX, maxY: testBbox.maxY });
           this._resolvedLevels.set(node.id, li);
         }
-        // If collides, leave unresolved — will fall to a lower level
       }
     }
 
     // Any remaining unresolved nodes get level 0
-    for (const node of visibleNodes) {
+    for (let i = 0; i < collisionNodes.length; i++) {
+      const node = collisionNodes[i];
       if (!this._resolvedLevels.has(node.id)) {
         this._resolvedLevels.set(node.id, 0);
       }
     }
+
   }
 
   /**
@@ -1121,6 +1167,43 @@ export default class NodeCollection {
     });
   }
 
+  /**
+   * Fill a reusable bbox object with screen-space collision bounds for a node.
+   */
+  _fillBbox(bbox, node, level, contentScale, zoom, drawContext) {
+    const ctx = this._buildCtx(node.id);
+    const bounds = computeLevelBounds(level, node.data, ctx);
+    const screenPos = drawContext.sceneToScreen(node.x, node.y);
+    const hw = (bounds.width * contentScale * zoom) / 2;
+    const hh = (bounds.height * contentScale * zoom) / 2;
+    bbox.minX = screenPos.x - hw;
+    bbox.minY = screenPos.y - hh;
+    bbox.maxX = screenPos.x + hw;
+    bbox.maxY = screenPos.y + hh;
+  }
+
+  /**
+   * Sort a flat [node, importance, node, importance, ...] array by importance
+   * descending. Avoids allocating {node, importance} wrapper objects.
+   */
+  _sortPairs(arr) {
+    const len = arr.length >> 1;
+    if (len <= 1) return;
+    // For small arrays, insertion sort on pairs (avoids temp array allocation)
+    for (let i = 1; i < len; i++) {
+      const node = arr[i * 2];
+      const imp = arr[i * 2 + 1];
+      let j = i - 1;
+      while (j >= 0 && arr[j * 2 + 1] < imp) {
+        arr[(j + 1) * 2] = arr[j * 2];
+        arr[(j + 1) * 2 + 1] = arr[j * 2 + 1];
+        j--;
+      }
+      arr[(j + 1) * 2] = node;
+      arr[(j + 1) * 2 + 1] = imp;
+    }
+  }
+
   // ── Clear / Dispose ────────────────────────────────────────────────
 
   clear() {
@@ -1141,6 +1224,8 @@ export default class NodeCollection {
     this._prevResolvedLevels.clear();
     this._transitions.clear();
     this._collisionTrees.clear();
+    this._lastCollisionZoom = 0;
+    this._lastCandidateLevel = undefined;
   }
 
   dispose() {

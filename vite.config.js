@@ -17,7 +17,5 @@ export default defineConfig({
         }
       }
     }
-  },
-  root: 'demo',
-  publicDir: false
+  }
 });

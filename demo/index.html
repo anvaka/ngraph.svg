@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ngraph.svg Demo</title>
+  <title>ngraph.svg Demos</title>
   <style>
     * {
       margin: 0;
@@ -15,100 +15,96 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #1a1a2e;
       color: #eee;
-      overflow: hidden;
-    }
-
-    #container {
-      width: 100vw;
-      height: 100vh;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    }
-
-    .controls {
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      z-index: 100;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      justify-content: center;
     }
 
-    .controls button {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.1);
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
       color: #fff;
-      font-size: 14px;
-      cursor: pointer;
-      transition: background 0.2s;
-      backdrop-filter: blur(10px);
     }
 
-    .controls button:hover {
-      background: rgba(255, 255, 255, 0.2);
+    .subtitle {
+      color: #6dd5ed;
+      margin-bottom: 2.5rem;
+      font-size: 1rem;
+      opacity: 0.8;
     }
 
-    .info {
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      z-index: 100;
-      padding: 15px;
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(10px);
-      font-size: 13px;
-      line-height: 1.6;
+    .demos {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 700px;
     }
 
-    .info h3 {
+    .demo-card {
+      display: block;
+      width: 300px;
+      padding: 28px 24px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      text-decoration: none;
+      color: #eee;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .demo-card:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .demo-card h2 {
+      font-size: 1.15rem;
       margin-bottom: 8px;
-      font-size: 14px;
       color: #4a90d9;
     }
 
-    .stat {
-      display: flex;
-      justify-content: space-between;
-      gap: 20px;
+    .demo-card p {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      opacity: 0.75;
     }
 
-    .stat span:last-child {
+    .github-link {
+      margin-top: 2.5rem;
+      font-size: 0.9rem;
+      opacity: 0.6;
+    }
+
+    .github-link a {
       color: #6dd5ed;
+      text-decoration: none;
+    }
+
+    .github-link a:hover {
+      text-decoration: underline;
+      opacity: 1;
     }
   </style>
 </head>
 <body>
-  <div id="container"></div>
+  <h1>ngraph.svg</h1>
+  <p class="subtitle">SVG-based graph visualization with adaptive rendering</p>
 
-  <div class="controls">
-    <button id="btnReset">Reset View</button>
-    <button id="btnToggleLayout">Pause Layout</button>
-    <button id="btnAddNodes">Add 10 Nodes</button>
+  <div class="demos">
+    <a class="demo-card" href="./graph-explorer.html">
+      <h2>Graph Explorer</h2>
+      <p>Adaptive rendering with multiple graph types. Switch between Les Miserables, Watts-Strogatz, grid, binary tree, and more.</p>
+    </a>
+
+    <a class="demo-card" href="./chinese-vocab.html">
+      <h2>Chinese Vocabulary DAG</h2>
+      <p>Real-world hierarchical data with overlap removal. Explore Chinese vocabulary organized by semantic categories.</p>
+    </a>
   </div>
 
-  <div class="info">
-    <h3>ngraph.svg Demo</h3>
-    <div class="stat">
-      <span>Nodes:</span>
-      <span id="nodeCount">0</span>
-    </div>
-    <div class="stat">
-      <span>Edges:</span>
-      <span id="edgeCount">0</span>
-    </div>
-    <div class="stat">
-      <span>Zoom:</span>
-      <span id="zoomLevel">1.00x</span>
-    </div>
-    <p style="margin-top: 10px; opacity: 0.7; font-size: 12px;">
-      Scroll to zoom • Drag to pan<br>
-      Zoom in to see adaptive detail levels
-    </p>
-  </div>
-
-  <script type="module" src="./main.js"></script>
+  <p class="github-link"><a href="https://github.com/anvaka/ngraph.svg">GitHub</a></p>
 </body>
 </html>
