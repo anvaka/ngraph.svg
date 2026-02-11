@@ -258,6 +258,81 @@ body {
 .word-hsk.hsk-6 { background: #ff3b30; color: white; }
 .word-hsk.hsk-unknown { background: #8e8e93; color: white; }
 
+/* Mobile layout */
+@media (max-width: 640px) {
+  .controls {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    padding: 10px 12px;
+    min-width: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .control-group {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .control-group label {
+    font-size: 11px;
+  }
+
+  .control-group select {
+    padding: 6px 28px 6px 8px;
+    font-size: 13px;
+  }
+
+  .controls button {
+    padding: 8px 12px;
+    font-size: 13px;
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .info-panel {
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    padding: 10px 14px;
+    min-width: 0;
+  }
+
+  .info-panel h3 {
+    display: none;
+  }
+
+  .stats {
+    flex-direction: row;
+    gap: 12px;
+  }
+
+  .help-text {
+    display: none;
+  }
+
+  .word-detail {
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: 16px 16px 0 0;
+    min-width: 0;
+    max-width: none;
+    padding: 20px;
+  }
+
+  .word-hanzi {
+    font-size: 36px;
+  }
+
+  .word-pinyin {
+    font-size: 18px;
+  }
+}
+
 /* SVG Node Styles */
 .node {
   cursor: pointer;

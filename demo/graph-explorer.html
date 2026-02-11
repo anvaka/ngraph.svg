@@ -100,6 +100,59 @@
     .stat span:last-child {
       color: #6dd5ed;
     }
+
+    /* Mobile layout */
+    @media (max-width: 640px) {
+      .controls {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .controls select,
+      .controls button {
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      .controls select {
+        flex: 1 1 100%;
+      }
+
+      .controls button {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: nowrap;
+      }
+
+      .info {
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        padding: 10px 14px;
+      }
+
+      .info h3 {
+        display: none;
+      }
+
+      .info .stats-row {
+        display: flex;
+        gap: 12px;
+      }
+
+      .info .stat {
+        gap: 6px;
+      }
+
+      .info p,
+      .info a {
+        display: none;
+      }
+    }
   </style>
 </head>
 <body>
@@ -121,20 +174,22 @@
 
   <div class="info">
     <h3>Graph Explorer</h3>
-    <div class="stat">
-      <span>Nodes:</span>
-      <span id="nodeCount">0</span>
-    </div>
-    <div class="stat">
-      <span>Edges:</span>
-      <span id="edgeCount">0</span>
-    </div>
-    <div class="stat">
-      <span>Zoom:</span>
-      <span id="zoomLevel">1.00x</span>
+    <div class="stats-row">
+      <div class="stat">
+        <span>Nodes:</span>
+        <span id="nodeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Edges:</span>
+        <span id="edgeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Zoom:</span>
+        <span id="zoomLevel">1.00x</span>
+      </div>
     </div>
     <p style="margin-top: 10px; opacity: 0.7; font-size: 12px;">
-      Scroll to zoom • Drag to pan<br>
+      Scroll to zoom &bull; Drag to pan<br>
       Zoom in to see adaptive detail levels
     </p>
     <a href="https://github.com/anvaka/ngraph.svg" style="display:block;margin-top:10px;color:#6dd5ed;font-size:12px;opacity:0.7;text-decoration:none;">GitHub</a>

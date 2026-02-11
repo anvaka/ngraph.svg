@@ -2,7 +2,7 @@ import generators from 'ngraph.generators';
 import {
   createScene,
   NodeCollection,
-  EdgeCollection,
+  CanvasEdgeCollection,
   ForceLayoutAdapter
 } from '../src/index.js';
 
@@ -104,7 +104,8 @@ const scene = createScene(container, {
 });
 
 // Create collections for nodes and edges
-const edges = new EdgeCollection({
+const edges = new CanvasEdgeCollection({
+  container,
   color: '#4a5568',
   width: 0.5,
   opacity: 0.4
