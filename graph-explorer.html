@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph Explorer - ngraph.svg</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      overflow: hidden;
+    }
+
+    #container {
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+
+    .controls {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .controls button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+      backdrop-filter: blur(10px);
+    }
+
+    .controls button:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .controls select {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+
+    .controls select option {
+      background: #1a1a2e;
+      color: #fff;
+    }
+
+    .info {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 100;
+      padding: 15px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .info h3 {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #4a90d9;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .stat span:last-child {
+      color: #6dd5ed;
+    }
+
+    /* Mobile layout */
+    @media (max-width: 640px) {
+      .controls {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .controls select,
+      .controls button {
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      .controls select {
+        flex: 1 1 100%;
+      }
+
+      .controls button {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: nowrap;
+      }
+
+      .info {
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        padding: 10px 14px;
+      }
+
+      .info h3 {
+        display: none;
+      }
+
+      .info .stats-row {
+        display: flex;
+        gap: 12px;
+      }
+
+      .info .stat {
+        gap: 6px;
+      }
+
+      .info p,
+      .info a {
+        display: none;
+      }
+    }
+  </style>
+  <script type="module" crossorigin src="/ngraph.svg/assets/graph-explorer-B0JpGq3J.js"></script>
+  <link rel="modulepreload" crossorigin href="/ngraph.svg/assets/ForceLayoutAdapter-KbGwD6E3.js">
+  <link rel="modulepreload" crossorigin href="/ngraph.svg/assets/index-BzRJ2RaR.js">
+</head>
+<body>
+  <div id="container"></div>
+
+  <div class="controls">
+    <select id="graphType">
+      <option value="miserables">Les Miserables</option>
+      <option value="wattsStrogatz">Watts-Strogatz</option>
+      <option value="grid">Grid 10x10</option>
+      <option value="balancedBinTree">Binary Tree</option>
+      <option value="cliqueCircle">Clique Circle</option>
+      <option value="completeBipartite">Complete Bipartite</option>
+    </select>
+    <button id="btnReset">Reset View</button>
+    <button id="btnToggleLayout">Pause Layout</button>
+    <button id="btnAddNodes">Add 10 Nodes</button>
+  </div>
+
+  <div class="info">
+    <h3>Graph Explorer</h3>
+    <div class="stats-row">
+      <div class="stat">
+        <span>Nodes:</span>
+        <span id="nodeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Edges:</span>
+        <span id="edgeCount">0</span>
+      </div>
+      <div class="stat">
+        <span>Zoom:</span>
+        <span id="zoomLevel">1.00x</span>
+      </div>
+    </div>
+    <p style="margin-top: 10px; opacity: 0.7; font-size: 12px;">
+      Scroll to zoom &bull; Drag to pan<br>
+      Zoom in to see adaptive detail levels
+    </p>
+    <a href="https://github.com/anvaka/ngraph.svg" style="display:block;margin-top:10px;color:#6dd5ed;font-size:12px;opacity:0.7;text-decoration:none;">GitHub</a>
+  </div>
+
+</body>
+</html>
