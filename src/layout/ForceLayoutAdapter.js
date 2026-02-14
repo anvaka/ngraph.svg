@@ -605,6 +605,28 @@ export default class ForceLayoutAdapter {
    * don't all stack on top of each other. Zero their velocity.
    */
   _unpinLayer(layerIndex) {
+    // Pre-compute fallback position for nodes with no anchor:
+    // centroid + spread of already-visible nodes
+    let cx = 0, cy = 0, visibleCount = 0, maxDist = 0;
+    this._graph.forEachNode((node) => {
+      if (this._hiddenNodes.has(node.id)) return;
+      const pos = this._layout.getNodePosition(node.id);
+      cx += pos.x;
+      cy += pos.y;
+      visibleCount++;
+    });
+    if (visibleCount > 0) {
+      cx /= visibleCount;
+      cy /= visibleCount;
+      this._graph.forEachNode((node) => {
+        if (this._hiddenNodes.has(node.id)) return;
+        const pos = this._layout.getNodePosition(node.id);
+        const d = Math.hypot(pos.x - cx, pos.y - cy);
+        if (d > maxDist) maxDist = d;
+      });
+    }
+    const fallbackRadius = maxDist + 20;
+
     this._graph.forEachNode((node) => {
       if (this._layerMap.get(node.id) !== layerIndex) return;
 
@@ -636,6 +658,13 @@ export default class ForceLayoutAdapter {
         const jitter = 5;
         pos.x = anchorPos.x + (Math.random() - 0.5) * jitter;
         pos.y = anchorPos.y + (Math.random() - 0.5) * jitter;
+      } else if (visibleCount > 0) {
+        // No connected anchor — place on the periphery of current layout
+        // so isolated nodes don't pile up at (0,0)
+        const angle = Math.random() * Math.PI * 2;
+        const pos = this._layout.getNodePosition(node.id);
+        pos.x = cx + Math.cos(angle) * fallbackRadius;
+        pos.y = cy + Math.sin(angle) * fallbackRadius;
       }
 
       // Zero velocity so the node doesn't fly off

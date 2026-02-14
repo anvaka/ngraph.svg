@@ -1,4 +1,5 @@
 import RBush from 'rbush';
+import DomOverlay from './DomOverlay.js';
 
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -31,24 +32,37 @@ function escapeHtml(str) {
  *   becomes: { minZoom: 0, layers: [{ type: 'circle', radius: 2, fill: '#CFCCDF' }] }
  */
 function normalizeLevel(level) {
+  let normalized;
   if (level.type && !level.layers) {
     // Shorthand: single layer
     const { minZoom, maxZoom, importance, hitArea, ...layerProps } = level;
-    return {
+    normalized = {
       minZoom: minZoom || 0,
       maxZoom: maxZoom,
       importance: importance,
       hitArea: hitArea,
       layers: [layerProps],
     };
+  } else {
+    normalized = {
+      minZoom: level.minZoom || 0,
+      maxZoom: level.maxZoom,
+      importance: level.importance,
+      hitArea: level.hitArea,
+      layers: level.layers || [],
+    };
   }
-  return {
-    minZoom: level.minZoom || 0,
-    maxZoom: level.maxZoom,
-    importance: level.importance,
-    hitArea: level.hitArea,
-    layers: level.layers || [],
-  };
+  // Detect DOM layers
+  const domLayer = normalized.layers.find(l => l.type === 'dom');
+  if (domLayer) {
+    normalized._domLayer = domLayer;
+  }
+  // Detect SVG layers with update callback
+  const svgLayer = normalized.layers.find(l => l.type === 'svg' && l.update);
+  if (svgLayer) {
+    normalized._svgUpdate = svgLayer.update;
+  }
+  return normalized;
 }
 
 /**
@@ -148,12 +162,15 @@ function renderLayer(layer, data, ctx) {
     return `<text ${attrs}>${escapeHtml(str)}</text>`;
   }
 
-  if (type === 'render') {
-    if (typeof layer.render === 'function') {
-      return layer.render(data, ctx) || '';
+  if (type === 'svg') {
+    if (typeof layer.create === 'function') {
+      return layer.create(data, ctx) || '';
     }
     return '';
   }
+
+  // DOM layers are handled by DomOverlay, not SVG rendering
+  if (type === 'dom') return '';
 
   return '';
 }
@@ -218,6 +235,16 @@ function computeLevelBounds(normalizedLevel, data, ctx) {
     } else if (type === 'rect') {
       const w = resolve(layer.width, data, ctx) || 10;
       const h = resolve(layer.height, data, ctx) || 10;
+      if (w > maxW) maxW = w;
+      if (h > maxH) maxH = h;
+    } else if (type === 'svg') {
+      const w = resolve(layer.width, data, ctx);
+      const h = resolve(layer.height, data, ctx);
+      if (w && w > maxW) maxW = w;
+      if (h && h > maxH) maxH = h;
+    } else if (type === 'dom') {
+      const w = resolve(layer.width, data, ctx) || 0;
+      const h = resolve(layer.height, data, ctx) || 0;
       if (w > maxW) maxW = w;
       if (h > maxH) maxH = h;
     } else if (type === 'text') {
@@ -365,6 +392,10 @@ export default class NodeCollection {
     this._collisionCandidates = []; // reused per level
     this._collisionStable = [];     // reused per level (preserveExisting mode)
 
+    // DOM overlay for `type: 'dom'` layers
+    this._hasDomLayers = this._levels.some(l => l._domLayer);
+    this._domOverlay = null; // lazy init on first render
+
     // Graph binding
     this._graph = options.graph || null;
     this._graphChangeListener = null;
@@ -451,6 +482,8 @@ export default class NodeCollection {
       this._elementPool.push(node._element);
       node._element = null;
     }
+
+    if (this._domOverlay) this._domOverlay.remove(node.id);
 
     this._freeIndices.push(node.index);
     this._nodes[node.index] = null;
@@ -662,11 +695,20 @@ export default class NodeCollection {
 
   syncPositions(positions) {
     this.beginBatch();
+    // Update positions for nodes in the map and show them;
+    // hide nodes not in the map (e.g. hidden by layered layout).
     for (const [id, pos] of positions) {
       const node = this._nodeMap.get(id);
       if (node) {
         node.x = pos.x;
         node.y = pos.y;
+        if (!node.visible) node.visible = true;
+      }
+    }
+    for (let i = 0; i < this._nodes.length; i++) {
+      const node = this._nodes[i];
+      if (node && node.visible && !positions.has(node.id)) {
+        node.visible = false;
       }
     }
     this._positionsDirty = true;
@@ -813,6 +855,15 @@ export default class NodeCollection {
       this._lastCollisionZoom = newScale;
     }
 
+    // Lazy-init DOM overlay on first render
+    if (this._hasDomLayers && !this._domOverlay) {
+      const svg = this._root.ownerSVGElement;
+      if (svg) this._domOverlay = new DomOverlay(svg);
+    }
+    if (this._domOverlay) {
+      this._domOverlay.syncTransform(drawContext);
+    }
+
     if (this._positionsDirty) {
       this._positionsDirty = false;
       this._spatialValid = false;
@@ -862,6 +913,11 @@ export default class NodeCollection {
     const candidates = this._collisionCandidates;
     const stableList = this._collisionStable;
 
+    // Pre-compute screen center for centerProximity (available in ctx for importance functions)
+    const screenCenterX = drawContext.width / 2;
+    const screenCenterY = drawContext.height / 2;
+    const maxCenterDist = Math.hypot(screenCenterX, screenCenterY) || 1;
+
     // Reusable bbox object — only used transiently for tree.collides() checks.
     // tree.insert() copies the values internally, so reuse is safe for collides().
     // For insert(), we still allocate since RBush stores the reference.
@@ -903,7 +959,10 @@ export default class NodeCollection {
           const node = collisionNodes[i];
           if (this._resolvedLevels.has(node.id)) continue;
           if (this._prevResolvedLevels.get(node.id) !== li) continue;
-          const importance = resolve(level.importance, node.data, this._buildCtx(node.id));
+          const ctx = this._buildCtx(node.id);
+          const sp = drawContext.sceneToScreen(node.x, node.y);
+          ctx.centerProximity = 1 - Math.min(1, Math.hypot(sp.x - screenCenterX, sp.y - screenCenterY) / maxCenterDist);
+          const importance = resolve(level.importance, node.data, ctx);
           stableList.push(node, importance || 0);
         }
         // Sort pairs [node, importance, node, importance, ...] by importance desc
@@ -925,7 +984,10 @@ export default class NodeCollection {
       for (let i = 0; i < collisionNodes.length; i++) {
         const node = collisionNodes[i];
         if (this._resolvedLevels.has(node.id)) continue;
-        const importance = resolve(level.importance, node.data, this._buildCtx(node.id));
+        const ctx = this._buildCtx(node.id);
+        const sp = drawContext.sceneToScreen(node.x, node.y);
+        ctx.centerProximity = 1 - Math.min(1, Math.hypot(sp.x - screenCenterX, sp.y - screenCenterY) / maxCenterDist);
+        const importance = resolve(level.importance, node.data, ctx);
         candidates.push(node, importance || 0);
       }
       this._sortPairs(candidates);
@@ -978,7 +1040,7 @@ export default class NodeCollection {
       if (!node || !node._element) continue;
 
       const visibilityRadius = Math.max(node.size, 50 / this._lastScale);
-      const visible = drawContext.isVisible(node.x, node.y, visibilityRadius);
+      const visible = node.visible && drawContext.isVisible(node.x, node.y, visibilityRadius);
 
       if (visible) {
         if (!node._inDOM) {
@@ -989,9 +1051,12 @@ export default class NodeCollection {
         this._applyTransform(node);
         this._updateNodeContent(node, drawContext, scaleChanged);
         this._attachedNodes.add(node);
-      } else if (node._inDOM) {
-        this._root.removeChild(node._element);
-        node._inDOM = false;
+      } else {
+        if (node._inDOM) {
+          this._root.removeChild(node._element);
+          node._inDOM = false;
+        }
+        if (this._domOverlay) this._domOverlay.detach(node.id);
       }
     }
   }
@@ -1031,9 +1096,12 @@ export default class NodeCollection {
     }
 
     for (const node of this._attachedNodes) {
-      if (!newAttached.has(node) && node._inDOM) {
-        this._root.removeChild(node._element);
-        node._inDOM = false;
+      if (!newAttached.has(node)) {
+        if (node._inDOM) {
+          this._root.removeChild(node._element);
+          node._inDOM = false;
+        }
+        if (this._domOverlay) this._domOverlay.detach(node.id);
       }
     }
 
@@ -1044,7 +1112,7 @@ export default class NodeCollection {
   _rebuildSpatialIndex() {
     const items = [];
     for (const node of this._nodes) {
-      if (!node) continue;
+      if (!node || !node.visible) continue;
       items.push({
         minX: node.x,
         minY: node.y,
@@ -1102,6 +1170,11 @@ export default class NodeCollection {
       node._currentLevel = resolvedLevel;
     }
 
+    // Handle DOM overlay lifecycle
+    if (this._domOverlay) {
+      this._syncDomLayer(node);
+    }
+
     // Skip re-render if level and state haven't changed and no transition is active
     if (!this._transitions.has(node.id) &&
         node._currentLevel === node._renderedLevel &&
@@ -1112,6 +1185,41 @@ export default class NodeCollection {
     this._renderNode(node);
     node._renderedLevel = node._currentLevel;
     node._renderedStateVersion = node._stateVersion;
+  }
+
+  /**
+   * Sync DOM overlay element for a node: create/attach/detach/update as needed.
+   * Uses world coordinates + contentScale to match SVG node scaling behavior.
+   */
+  _syncDomLayer(node) {
+    const level = this._levels[node._currentLevel];
+    const domLayer = level?._domLayer;
+
+    if (domLayer) {
+      const data = node.data;
+      const ctx = this._buildCtx(node.id);
+      const overlay = this._domOverlay;
+
+      // Ensure element exists (create only once)
+      overlay.ensureElement(node.id, data, ctx, domLayer.create);
+
+      // Position in world coords with same counter-scale as SVG nodes.
+      // Offset by half the declared width/height so the element centers
+      // on (node.x, node.y), matching SVG node centering.
+      const contentScale = Math.min(1, this._maxScale / this._lastScale);
+      const halfW = resolve(domLayer.width, data, ctx) / 2 || 0;
+      const halfH = resolve(domLayer.height, data, ctx) / 2 || 0;
+      overlay.setPosition(node.id, node.x, node.y, contentScale, halfW, halfH);
+      overlay.attach(node.id);
+
+      // Update state if changed
+      if (domLayer.update) {
+        overlay.updateState(node.id, data, ctx, domLayer.update, node._stateVersion);
+      }
+    } else {
+      // Not at a DOM level — detach if attached
+      this._domOverlay.detach(node.id);
+    }
   }
 
   /**
@@ -1154,6 +1262,9 @@ export default class NodeCollection {
         }
         return;
       }
+    } else if (node._renderedLevel === levelIndex && level._svgUpdate) {
+      // Same level, state-only change: use SVG update callback
+      level._svgUpdate(node.data, ctx, node._element);
     } else {
       const svg = renderLevelLayers(level, node.data, ctx);
       node._element.innerHTML = `<g>${svg}</g>`;
@@ -1252,6 +1363,10 @@ export default class NodeCollection {
     this._elementPool.length = 0;
     if (this._root.parentNode) {
       this._root.parentNode.removeChild(this._root);
+    }
+    if (this._domOverlay) {
+      this._domOverlay.dispose();
+      this._domOverlay = null;
     }
   }
 

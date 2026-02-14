@@ -97,8 +97,8 @@ async function init() {
         { minZoom: 1.7, importance,
           hitArea: { type: 'rect', width: d => Math.max(50, d.hanzi.length * 16 + 20), height: 36 },
           layers: [
-            { type: 'render',
-              render: (data, ctx) => {
+            { type: 'svg',
+              create: (data, ctx) => {
                 const charCount = data.hanzi.length;
                 const width = Math.max(50, charCount * 16 + 20);
                 const halfW = width / 2;
@@ -123,8 +123,8 @@ async function init() {
         { minZoom: 4, importance,
           hitArea: { type: 'rect', width: d => Math.max(90, d.hanzi.length * 20 + 30), height: 64 },
           layers: [
-            { type: 'render',
-              render: (data, ctx) => {
+            { type: 'svg',
+              create: (data, ctx) => {
                 const shortDef = data.definition ?
                   (data.definition.length > 12 ? data.definition.slice(0, 12) + '...' : data.definition) : '';
                 const hskColor = getHskColor(data.hsk);
@@ -173,8 +173,8 @@ async function init() {
         { minZoom: 8, importance,
           hitArea: { type: 'rect', width: d => Math.max(130, d.hanzi.length * 28 + 40), height: 90 },
           layers: [
-            { type: 'render',
-              render: (data, ctx) => {
+            { type: 'svg',
+              create: (data, ctx) => {
                 const hskColor = getHskColor(data.hsk);
                 const definition = data.definition || '';
                 const charCount = data.hanzi.length;

@@ -240,7 +240,7 @@ Levels define zoom-dependent rendering with collision-based importance. They are
 - `maxZoom` — maximum zoom (optional)
 - `importance` — function `d => 0..1` for collision gating. Omit for always-visible levels.
 - `layers` — array of layer definitions
-- `hitArea` — custom hit area for `render`-type layers: `{ type: 'rect', width, height }`
+- `hitArea` — custom hit area for `svg`/`dom`-type layers: `{ type: 'rect', width, height }`
 
 **How collision works:** Nodes with `importance` compete for screen space. More important nodes always win. If a node collides at level N, it falls back to level N-1, and so on down to level 0 (which has no importance gating and always renders).
 
@@ -261,7 +261,8 @@ Levels define zoom-dependent rendering with collision-based importance. They are
 | `circle` | Filled circle | `radius`, `fill`, `stroke`, `strokeWidth`, `opacity`, `filter` |
 | `rect` | Rectangle | `width`, `height`, `rx`, `ry`, `fill`, `stroke`, `strokeWidth`, `opacity`, `filter` |
 | `text` | Text label | `text`, `fontSize`, `fill`, `fontFamily`, `fontWeight`, `anchor`, `offset`, `maxWidth`, `opacity` |
-| `render` | Custom SVG | `render: (data, ctx) => svgString` |
+| `svg` | Custom SVG | `create: (data, ctx) => svgString`, `update: (data, ctx, el) => {}`, `width`, `height` |
+| `dom` | DOM overlay | `create: (data, ctx) => HTMLElement`, `update: (data, ctx, el) => {}`, `width`, `height` |
 
 All layer types support `visible: d => boolean` for conditional rendering.
 
