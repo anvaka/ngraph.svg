@@ -69,6 +69,15 @@ export default {
   _packComponentContexts(applyInstantly = false) {
     const contexts = this._componentContexts;
     const packInput = this._componentPackInput;
+    const entryToContext = this._componentEntryToContext || (this._componentEntryToContext = []);
+    const singleContextIndexes = this._singleContextIndexes || (this._singleContextIndexes = []);
+    const singleLocalOffsets = this._singleLocalOffsets || (this._singleLocalOffsets = []);
+
+    entryToContext.length = 0;
+    singleContextIndexes.length = 0;
+    singleLocalOffsets.length = 0;
+
+    let packCount = 0;
 
     if (packInput.length > contexts.length) {
       packInput.length = contexts.length;
@@ -81,28 +90,132 @@ export default {
         context.boundsDirty = false;
       }
 
-      let entry = packInput[i];
-      if (!entry) {
-        entry = { id: i, width: 1, height: 1 };
-        packInput[i] = entry;
+      if (context.nodes.length === 1) {
+        singleContextIndexes.push(i);
+        continue;
       }
 
-      entry.id = i;
+      let entry = packInput[packCount];
+      if (!entry) {
+        entry = { id: packCount, width: 1, height: 1 };
+        packInput[packCount] = entry;
+      }
+
+      entry.id = packCount;
       entry.width = Math.max(1, context.bounds.width);
       entry.height = Math.max(1, context.bounds.height);
+      entryToContext[packCount] = i;
+      packCount += 1;
     }
 
+    let singlesEntryIndex = -1;
+    if (singleContextIndexes.length > 0) {
+      const singleBounds = this._computeSingleClusterLayout(
+        contexts,
+        singleContextIndexes,
+        singleLocalOffsets
+      );
+      let entry = packInput[packCount];
+      if (!entry) {
+        entry = { id: packCount, width: 1, height: 1 };
+        packInput[packCount] = entry;
+      }
+      entry.id = packCount;
+      entry.width = singleBounds.width;
+      entry.height = singleBounds.height;
+      singlesEntryIndex = packCount;
+      packCount += 1;
+    }
+
+    packInput.length = packCount;
+
     const offsets = packComponents(packInput, this._componentPackingPadding);
-    for (let i = 0; i < contexts.length; ++i) {
-      const context = contexts[i];
+    for (let i = 0; i < entryToContext.length; ++i) {
+      const context = contexts[entryToContext[i]];
       const offset = offsets[i];
-      context.targetOffsetX = offset.x;
-      context.targetOffsetY = offset.y;
+      context.targetOffsetX = offset.x - context.bounds.left;
+      context.targetOffsetY = offset.y - context.bounds.top;
       if (applyInstantly) {
-        context.offsetX = offset.x;
-        context.offsetY = offset.y;
+        context.offsetX = context.targetOffsetX;
+        context.offsetY = context.targetOffsetY;
       }
     }
+
+    if (singlesEntryIndex !== -1) {
+      const blockOffset = offsets[singlesEntryIndex];
+      for (let i = 0; i < singleContextIndexes.length; ++i) {
+        const context = contexts[singleContextIndexes[i]];
+        const local = singleLocalOffsets[i];
+        context.targetOffsetX = blockOffset.x + local.x - context.bounds.left;
+        context.targetOffsetY = blockOffset.y + local.y - context.bounds.top;
+        if (applyInstantly) {
+          context.offsetX = context.targetOffsetX;
+          context.offsetY = context.targetOffsetY;
+        }
+      }
+    }
+  },
+
+  _computeSingleClusterLayout(contexts, singleContextIndexes, singleLocalOffsets) {
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const items = new Array(singleContextIndexes.length);
+    let sizeSum = 0;
+
+    for (let i = 0; i < singleContextIndexes.length; ++i) {
+      const contextIndex = singleContextIndexes[i];
+      const nodeId = contexts[contextIndex].nodes[0];
+      const diameter = Math.max(1, this._getNodeSize(nodeId) || 1);
+      items[i] = { contextIndex, diameter };
+      sizeSum += diameter;
+    }
+
+    items.sort((a, b) => b.diameter - a.diameter);
+
+    const avgSize = sizeSum / Math.max(1, items.length);
+    const step = Math.max(8, avgSize * 0.55 + this._componentPackingPadding * 0.12);
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    const localByContext = new Map();
+
+    for (let i = 0; i < items.length; ++i) {
+      const item = items[i];
+      const radius = item.diameter * 0.5;
+      const spiral = i === 0 ? 0 : step * Math.sqrt(i) + radius;
+      const angle = i * goldenAngle;
+      const x = Math.cos(angle) * spiral;
+      const y = Math.sin(angle) * spiral;
+
+      localByContext.set(item.contextIndex, { x, y });
+
+      const left = x - radius;
+      const top = y - radius;
+      const right = x + radius;
+      const bottom = y + radius;
+      if (left < minX) minX = left;
+      if (top < minY) minY = top;
+      if (right > maxX) maxX = right;
+      if (bottom > maxY) maxY = bottom;
+    }
+
+    const shiftX = minX;
+    const shiftY = minY;
+    for (let i = 0; i < singleContextIndexes.length; ++i) {
+      const contextIndex = singleContextIndexes[i];
+      const local = localByContext.get(contextIndex);
+      singleLocalOffsets[i] = {
+        x: local.x - shiftX,
+        y: local.y - shiftY,
+      };
+    }
+
+    return {
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY),
+    };
   },
 
   _updateComponentOffsets(dt) {

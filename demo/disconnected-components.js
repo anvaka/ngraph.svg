@@ -38,12 +38,14 @@ scene.addCollection(nodes);
 
 const componentCountInput = document.getElementById('componentCount');
 const avgSizeInput = document.getElementById('avgSize');
+const singlePercentInput = document.getElementById('singlePercent');
 const seedInput = document.getElementById('seed');
 const componentLayoutInput = document.getElementById('componentLayout');
 const motifLayoutInput = document.getElementById('motifLayout');
 
 const componentCountValue = document.getElementById('componentCountValue');
 const avgSizeValue = document.getElementById('avgSizeValue');
+const singlePercentValue = document.getElementById('singlePercentValue');
 const seedValue = document.getElementById('seedValue');
 
 const statNodes = document.getElementById('statNodes');
@@ -70,6 +72,7 @@ updateSliderLabels();
 
 componentCountInput.addEventListener('input', updateSliderLabels);
 avgSizeInput.addEventListener('input', updateSliderLabels);
+singlePercentInput.addEventListener('input', updateSliderLabels);
 seedInput.addEventListener('input', updateSliderLabels);
 
 btnGenerate.addEventListener('click', () => {
@@ -105,6 +108,7 @@ regenerate();
 function updateSliderLabels() {
   componentCountValue.textContent = componentCountInput.value;
   avgSizeValue.textContent = avgSizeInput.value;
+  singlePercentValue.textContent = singlePercentInput.value;
   seedValue.textContent = seedInput.value;
 }
 
@@ -123,6 +127,7 @@ function regenerate() {
   const options = {
     componentCount: Number(componentCountInput.value),
     avgSize: Number(avgSizeInput.value),
+    singlePercent: Number(singlePercentInput.value),
     seed: Number(seedInput.value),
   };
 
@@ -220,12 +225,23 @@ function generateDisconnectedGraph(options) {
 
   const requestedComponents = options.componentCount;
   const avgSize = options.avgSize;
+  const singlePercent = clamp(options.singlePercent ?? 20, 0, 100);
+  const singleComponentCount = Math.floor(requestedComponents * (singlePercent / 100));
+  const remainingAfterSingles = Math.max(0, requestedComponents - singleComponentCount);
+  const pairComponentCount = Math.floor(remainingAfterSingles * 0.2);
 
   let totalNodes = 0;
   let totalEdges = 0;
 
   for (let componentIndex = 0; componentIndex < requestedComponents; ++componentIndex) {
-    const size = sampleComponentSize(avgSize, rng);
+    const size = resolveComponentSize(
+      componentIndex,
+      requestedComponents,
+      singleComponentCount,
+      pairComponentCount,
+      avgSize,
+      rng
+    );
     const baseId = `c${componentIndex}`;
 
     const nodeIds = new Array(size);
@@ -252,6 +268,19 @@ function generateDisconnectedGraph(options) {
     edgeCount: totalEdges,
     componentCount: requestedComponents,
   };
+}
+
+function resolveComponentSize(index, totalComponents, singleCount, pairCount, avgSize, rng) {
+  if (index < singleCount) return 1;
+  if (index < singleCount + pairCount) return 2;
+
+  const sampled = sampleComponentSize(avgSize, rng);
+  const remaining = totalComponents - index;
+
+  if (remaining <= 0) return sampled;
+  if (sampled > 2) return sampled;
+
+  return 3;
 }
 
 function sampleComponentSize(avgSize, rng) {

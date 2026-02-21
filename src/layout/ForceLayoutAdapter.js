@@ -184,8 +184,7 @@ export default class ForceLayoutAdapter {
           this._stableFrameCount++;
           if (this._stableFrameCount >= this._stableFramesRequired) {
             if (this._isComponentMode() && !this._componentPacked) {
-              this._packComponentContexts(false);
-              this._updateComponentOffsets(dt);
+              this._packComponentContexts(true);
               this._componentPacked = true;
             }
             this._stabilized = true;
@@ -257,8 +256,7 @@ export default class ForceLayoutAdapter {
     }
 
     if (this._isComponentMode() && !this._componentPacked) {
-      this._packComponentContexts(false);
-      this._updateComponentOffsets(16.67);
+      this._packComponentContexts(true);
       this._componentPacked = true;
     }
 

@@ -50,6 +50,8 @@ export function packComponents(components, padding = 80) {
   }
 
   // Center the packed arrangement around (0, 0)
+  // Offsets are treated as top-left anchors consistently for both
+  // row placement and bounding-box computation.
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -58,8 +60,8 @@ export function packComponents(components, padding = 80) {
   for (let i = 0; i < count; ++i) {
     const component = components[i];
     const offset = offsets[i];
-    const left = offset.x - component.width * 0.5;
-    const top = offset.y - component.height * 0.5;
+    const left = offset.x;
+    const top = offset.y;
     const right = left + component.width;
     const bottom = top + component.height;
 
