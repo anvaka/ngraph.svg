@@ -20,7 +20,9 @@
     "build": "vite build",
     "build:demo": "vite build --config vite.demo.config.js && cp demo/hypernym-dag-v2.json docs/",
     "preview": "vite preview --config vite.demo.config.js",
-    "bench:layout": "node bench/force-layout.benchmark.js"
+    "bench:layout": "node bench/force-layout.benchmark.js",
+    "bench:layout:layered": "node bench/force-layout-layered.benchmark.js",
+    "bench": "node bench/run-layout-benches.js"
   },
   "dependencies": {
     "ngraph.forcelayout": "^3.3.1",
