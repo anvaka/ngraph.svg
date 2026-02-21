@@ -1,0 +1,5 @@
+export const PHASE_CORE_LAYOUT = 'CORE_LAYOUT';
+export const PHASE_LAYER_SETTLE = 'LAYER_SETTLE';
+export const PHASE_STRESS_DETECT = 'STRESS_DETECT';
+export const PHASE_STRESS_REFINE = 'STRESS_REFINE';
+export const PHASE_DONE = 'DONE';

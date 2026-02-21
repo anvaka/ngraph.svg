@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, 'demo/index.html'),
         'graph-explorer': resolve(import.meta.dirname, 'demo/graph-explorer.html'),
+        'disconnected-components': resolve(import.meta.dirname, 'demo/disconnected-components.html'),
         'chinese-vocab': resolve(import.meta.dirname, 'demo/chinese-vocab.html'),
       }
     }

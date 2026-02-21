@@ -298,6 +298,13 @@ const layout = new ForceLayoutAdapter(graph, {
   layeredLayout: true,          // enable orchestrated layout (default)
   stressThreshold: 0.3,         // edge stretch threshold for refinement
   maxStressIterations: 200,
+  componentLayout: true,        // detect disconnected components and solve them independently
+  motifLayout: true,            // deterministic fast-path for tiny motifs (single/edge/triangle/star)
+  motifMaxSize: 64,             // max component size eligible for motif detection
+  componentPackingPadding: 80,  // spacing between packed disconnected components
+  componentPackingSmoothing: 0.16, // how quickly packed offsets are approached (higher = faster)
+  componentRepackInterval: 12,  // frames between component re-pack target updates
+  componentStableFramesRequired: 10, // stable frames before an individual component solver goes to sleep
   getNodeSize: (nodeId) => 10,  // for size-aware spacing
   nodePadding: 4,               // padding between nodes
   onStabilized: () => {},       // called when layout converges
@@ -324,6 +331,8 @@ const layout = new ForceLayoutAdapter(graph, {
 4. Detects and refines stretched edges (stress passes)
 
 The layout automatically restarts when nodes/edges are added to the graph.
+
+When `componentLayout` is enabled (default), disconnected components are detected once per structural graph update. Each component is solved independently, then packed into a non-overlapping global arrangement. This improves convergence and visual stability on fragmented graphs.
 
 ### State System
 
