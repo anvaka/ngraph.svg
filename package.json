@@ -19,7 +19,8 @@
     "dev": "vite --config vite.demo.config.js",
     "build": "vite build",
     "build:demo": "vite build --config vite.demo.config.js && cp demo/hypernym-dag-v2.json docs/",
-    "preview": "vite preview --config vite.demo.config.js"
+    "preview": "vite preview --config vite.demo.config.js",
+    "bench:layout": "node bench/force-layout.benchmark.js"
   },
   "dependencies": {
     "ngraph.forcelayout": "^3.3.1",
@@ -28,6 +29,7 @@
     "rbush": "^3.0.1"
   },
   "devDependencies": {
+    "benchmark": "^2.1.4",
     "vite": "^6.0.11"
   },
   "keywords": [
