@@ -75,6 +75,7 @@ export default class ForceLayoutAdapter {
     this._graphGrowthListener = (changes) => {
       let hasNewNodes = false;
       let hasStructuralChanges = false;
+      let hasPotentialNewComponent = false;
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
         if (change.node || change.link) {
@@ -83,8 +84,20 @@ export default class ForceLayoutAdapter {
         if (change.changeType === 'add' && (change.node || change.link)) {
           hasNewNodes = true;
         }
+        if (change.changeType === 'add' && change.node) {
+          const links = this._graph.getLinks(change.node.id);
+          const linkCount = links ? (links.size ?? links.length ?? 0) : 0;
+          if (linkCount === 0) {
+            hasPotentialNewComponent = true;
+          }
+        }
       }
-      if (hasStructuralChanges && this._componentLayout) {
+
+      const needsComponentReinit = this._componentLayout && (
+        this._isComponentMode() || hasPotentialNewComponent
+      );
+
+      if (hasStructuralChanges && needsComponentReinit) {
         this._phase = null;
         this._componentPacked = false;
         this._initPromise = this._initLayout(this._options);
