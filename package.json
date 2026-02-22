@@ -1,6 +1,6 @@
 {
   "name": "ngraph.svg",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "SVG-based graph visualization library with adaptive rendering",
   "type": "module",
   "main": "./src/index.js",
