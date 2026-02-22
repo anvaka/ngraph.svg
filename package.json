@@ -32,6 +32,8 @@
   },
   "devDependencies": {
     "benchmark": "^2.1.4",
+    "ngraph.fromdot": "^7.1.0",
+    "ngraph.louvain": "^2.0.0",
     "vite": "^6.0.11"
   },
   "keywords": [
