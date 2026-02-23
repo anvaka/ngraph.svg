@@ -23,7 +23,7 @@ export default {
     this._graph.forEachNode((node) => {
       if (layerMap.get(node.id) === maxLayer) {
         const body = this._layout.getBody(node.id);
-        if (body) body.isPinned = false;
+        if (body) body.isPinned = this._getDesiredPinnedState(node.id);
       } else {
         this._hiddenNodes.add(node.id);
         this._nodePositions.delete(node.id);
@@ -94,7 +94,7 @@ export default {
         this._pinAll();
         for (const id of stressedNodes) {
           const body = this._layout.getBody(id);
-          if (body) body.isPinned = false;
+          if (body) body.isPinned = this._getDesiredPinnedState(id);
         }
         this._stressPassCount++;
         this._stressIterCount = 0;
@@ -148,34 +148,38 @@ export default {
       const body = this._layout.getBody(node.id);
       if (!body) return;
 
-      let anchorPos = null;
-      this._graph.forEachLinkedNode(node.id, (neighbor) => {
-        const nLayer = this._layerMap.get(neighbor.id);
-        if (nLayer > layerIndex) {
-          anchorPos = this._layout.getNodePosition(neighbor.id);
-          return true;
-        }
-      });
+      const shouldStayPinned = this._getDesiredPinnedState(node.id);
 
-      if (!anchorPos) {
+      let anchorPos = null;
+      if (!shouldStayPinned) {
         this._graph.forEachLinkedNode(node.id, (neighbor) => {
-          if (!this._hiddenNodes.has(neighbor.id)) {
+          const nLayer = this._layerMap.get(neighbor.id);
+          if (nLayer > layerIndex) {
             anchorPos = this._layout.getNodePosition(neighbor.id);
             return true;
           }
         });
-      }
 
-      if (anchorPos) {
-        const pos = this._layout.getNodePosition(node.id);
-        const jitter = 5;
-        pos.x = anchorPos.x + (Math.random() - 0.5) * jitter;
-        pos.y = anchorPos.y + (Math.random() - 0.5) * jitter;
-      } else if (visibleCount > 0) {
-        const angle = Math.random() * Math.PI * 2;
-        const pos = this._layout.getNodePosition(node.id);
-        pos.x = cx + Math.cos(angle) * fallbackRadius;
-        pos.y = cy + Math.sin(angle) * fallbackRadius;
+        if (!anchorPos) {
+          this._graph.forEachLinkedNode(node.id, (neighbor) => {
+            if (!this._hiddenNodes.has(neighbor.id)) {
+              anchorPos = this._layout.getNodePosition(neighbor.id);
+              return true;
+            }
+          });
+        }
+
+        if (anchorPos) {
+          const pos = this._layout.getNodePosition(node.id);
+          const jitter = 5;
+          pos.x = anchorPos.x + (Math.random() - 0.5) * jitter;
+          pos.y = anchorPos.y + (Math.random() - 0.5) * jitter;
+        } else if (visibleCount > 0) {
+          const angle = Math.random() * Math.PI * 2;
+          const pos = this._layout.getNodePosition(node.id);
+          pos.x = cx + Math.cos(angle) * fallbackRadius;
+          pos.y = cy + Math.sin(angle) * fallbackRadius;
+        }
       }
 
       if (body.velocity) {
@@ -183,7 +187,7 @@ export default {
         body.velocity.y = 0;
       }
 
-      body.isPinned = false;
+      body.isPinned = shouldStayPinned;
       this._hiddenNodes.delete(node.id);
     });
   },
@@ -214,7 +218,7 @@ export default {
         if (!context.layout) continue;
         for (let n = 0; n < context.nodes.length; ++n) {
           const body = context.layout.getBody(context.nodes[n]);
-          if (body) body.isPinned = false;
+          if (body) body.isPinned = this._getDesiredPinnedState(context.nodes[n]);
         }
       }
       return;
@@ -222,7 +226,7 @@ export default {
 
     this._graph.forEachNode((node) => {
       const body = this._layout.getBody(node.id);
-      if (body) body.isPinned = false;
+      if (body) body.isPinned = this._getDesiredPinnedState(node.id);
     });
   },
 

@@ -53,6 +53,7 @@ export default {
       this._phase = null;
       this._hiddenNodes.clear();
       this._componentLayoutProxy = this._createComponentLayoutProxy();
+      this._restoreLayoutState();
       return this._componentLayoutProxy;
     }
 
@@ -62,6 +63,7 @@ export default {
     this._componentLayoutProxy = null;
 
     this._layout = createLayout(graph, finalOptions);
+    this._restoreLayoutState();
     return this._layout;
   },
 
@@ -158,5 +160,86 @@ export default {
     this._packComponentContexts(true);
 
     return true;
+  },
+
+  _getDesiredPinnedState(nodeId) {
+    if (this._pinOverrides.has(nodeId)) {
+      return this._pinOverrides.get(nodeId);
+    }
+
+    const node = this._graph.getNode(nodeId);
+    return !!(node && (node.isPinned || node.data?.isPinned));
+  },
+
+  _restoreLayoutState() {
+    if (this._isComponentMode()) {
+      this._restoreComponentLayoutState();
+      return;
+    }
+
+    if (!this._layout) return;
+
+    this._graph.forEachNode((node) => {
+      const body = this._layout.getBody(node.id);
+      if (!body) return;
+
+      const prevPos = this._nodePositions.get(node.id);
+      if (prevPos) {
+        const pos = this._layout.getNodePosition(node.id);
+        pos.x = prevPos.x;
+        pos.y = prevPos.y;
+        if (body.velocity) {
+          body.velocity.x = 0;
+          body.velocity.y = 0;
+        }
+      }
+
+      body.isPinned = this._getDesiredPinnedState(node.id);
+    });
+  },
+
+  _restoreComponentLayoutState() {
+    if (!this._isComponentMode()) return;
+
+    for (let i = 0; i < this._componentContexts.length; ++i) {
+      const context = this._componentContexts[i];
+      const localOffsetX = context.offsetX;
+      const localOffsetY = context.offsetY;
+      let contextBoundsChanged = false;
+
+      for (let n = 0; n < context.nodes.length; ++n) {
+        const nodeId = context.nodes[n];
+        const prevPos = this._nodePositions.get(nodeId);
+
+        if (context.layout) {
+          const body = context.layout.getBody(nodeId);
+          if (body) {
+            body.isPinned = this._getDesiredPinnedState(nodeId);
+          }
+
+          if (prevPos) {
+            const pos = context.layout.getNodePosition(nodeId);
+            pos.x = prevPos.x - localOffsetX;
+            pos.y = prevPos.y - localOffsetY;
+            if (body && body.velocity) {
+              body.velocity.x = 0;
+              body.velocity.y = 0;
+            }
+            contextBoundsChanged = true;
+          }
+        } else if (context.motifPositions && prevPos) {
+          const pos = context.motifPositions.get(nodeId);
+          if (pos) {
+            pos.x = prevPos.x - localOffsetX;
+            pos.y = prevPos.y - localOffsetY;
+            contextBoundsChanged = true;
+          }
+        }
+      }
+
+      if (contextBoundsChanged) {
+        context.boundsDirty = true;
+      }
+    }
   },
 };

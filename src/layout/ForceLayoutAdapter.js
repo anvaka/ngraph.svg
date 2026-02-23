@@ -69,6 +69,7 @@ export default class ForceLayoutAdapter {
     this._graphChangeListener = null;
     this._hiddenNodes = new Set();
     this._scratchPosition = { x: 0, y: 0 };
+    this._pinOverrides = new Map();
 
     this._initPromise = this._initLayout(options);
 
@@ -90,6 +91,9 @@ export default class ForceLayoutAdapter {
           if (linkCount === 0) {
             hasPotentialNewComponent = true;
           }
+        }
+        if (change.changeType === 'remove' && change.node) {
+          this._pinOverrides.delete(change.node.id);
         }
       }
 
@@ -303,17 +307,32 @@ export default class ForceLayoutAdapter {
           context.boundsDirty = true;
         }
       }
+      const cached = this._nodePositions.get(nodeId);
+      if (cached) {
+        cached.x = x;
+        cached.y = y;
+      } else {
+        this._nodePositions.set(nodeId, { x, y });
+      }
       return this;
     }
 
     const pos = this._layout.getNodePosition(nodeId);
     pos.x = x;
     pos.y = y;
+    const cached = this._nodePositions.get(nodeId);
+    if (cached) {
+      cached.x = x;
+      cached.y = y;
+    } else {
+      this._nodePositions.set(nodeId, { x, y });
+    }
     return this;
   }
 
   async pinNode(nodeId) {
     await this._initPromise;
+    this._pinOverrides.set(nodeId, true);
     const body = this._isComponentMode()
       ? this._componentLayoutProxy.getBody(nodeId)
       : this._layout.getBody(nodeId);
@@ -325,6 +344,7 @@ export default class ForceLayoutAdapter {
 
   async unpinNode(nodeId) {
     await this._initPromise;
+    this._pinOverrides.set(nodeId, false);
     const body = this._isComponentMode()
       ? this._componentLayoutProxy.getBody(nodeId)
       : this._layout.getBody(nodeId);
@@ -397,6 +417,7 @@ export default class ForceLayoutAdapter {
     this._componentPackInput.length = 0;
     this._componentLayoutProxy = null;
     this._nodeToComponentContext.clear();
+    this._pinOverrides.clear();
     this._graph = null;
     this._nodePositions.clear();
     this._onUpdate = null;
