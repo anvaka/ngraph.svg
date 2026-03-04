@@ -172,10 +172,10 @@ export default {
         if (anchorPos) {
           const pos = this._layout.getNodePosition(node.id);
           const jitter = 5;
-          pos.x = anchorPos.x + (Math.random() - 0.5) * jitter;
-          pos.y = anchorPos.y + (Math.random() - 0.5) * jitter;
+          pos.x = anchorPos.x + (this._random.nextDouble() - 0.5) * jitter;
+          pos.y = anchorPos.y + (this._random.nextDouble() - 0.5) * jitter;
         } else if (visibleCount > 0) {
-          const angle = Math.random() * Math.PI * 2;
+          const angle = this._random.nextDouble() * Math.PI * 2;
           const pos = this._layout.getNodePosition(node.id);
           pos.x = cx + Math.cos(angle) * fallbackRadius;
           pos.y = cy + Math.sin(angle) * fallbackRadius;

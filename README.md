@@ -285,6 +285,7 @@ Wraps ngraph.forcelayout with animation loop, position smoothing, layered orches
 
 ```js
 const layout = new ForceLayoutAdapter(graph, {
+  seed: 42,                     // PRNG seed for reproducible layouts (default 42)
   springLength: 30,
   springCoefficient: 0.0008,
   gravity: -2.0,

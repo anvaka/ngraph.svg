@@ -16,6 +16,7 @@ import {
   PHASE_STRESS_REFINE,
   PHASE_DONE,
 } from './forceLayoutAdapter.constants.js';
+import createRandom from './createRandom.js';
 import initMethods from './forceLayoutAdapter.init.js';
 import componentMethods from './forceLayoutAdapter.component.js';
 import orchestrationMethods from './forceLayoutAdapter.orchestration.js';
@@ -70,6 +71,7 @@ export default class ForceLayoutAdapter {
     this._hiddenNodes = new Set();
     this._scratchPosition = { x: 0, y: 0 };
     this._pinOverrides = new Map();
+    this._random = createRandom(options.seed ?? 42);
 
     this._initPromise = this._initLayout(options);
 
