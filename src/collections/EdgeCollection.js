@@ -298,7 +298,7 @@ export default class EdgeCollection {
 
       const fromId = edge.data.fromId;
       const toId = edge.data.toId;
-      if (!fromId || !toId) continue;
+      if (fromId == null || toId == null) continue;
 
       const fromPos = positions.get(fromId);
       const toPos = positions.get(toId);
@@ -511,7 +511,7 @@ export default class EdgeCollection {
       if (!cached) continue;
 
       const toId = edge.data.toId;
-      if (!toId) continue;
+      if (toId == null) continue;
 
       const shape = nodeCol.getNodeShape(toId);
       if (!shape) continue;

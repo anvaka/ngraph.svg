@@ -283,7 +283,7 @@ export default class CanvasEdgeCollection {
 
       const fromId = edge.data.fromId;
       const toId = edge.data.toId;
-      if (!fromId || !toId) continue;
+      if (fromId == null || toId == null) continue;
 
       const fromPos = positions.get(fromId);
       const toPos = positions.get(toId);
@@ -700,7 +700,7 @@ export default class CanvasEdgeCollection {
       const toId = edge.data.toId;
       const fromId = edge.data.fromId;
 
-      if (toId) {
+      if (toId != null) {
         const shape = nodeCol.getNodeShape(toId);
         if (shape) {
           const offset = intersectShape(cached.dirX, cached.dirY, shape);
@@ -708,7 +708,7 @@ export default class CanvasEdgeCollection {
           edge.toY = shape.y + offset.y;
         }
       }
-      if (fromId) {
+      if (fromId != null) {
         const shape = nodeCol.getNodeShape(fromId);
         if (shape) {
           const offset = intersectShape(-cached.dirX, -cached.dirY, shape);
