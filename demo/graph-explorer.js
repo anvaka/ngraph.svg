@@ -1,4 +1,5 @@
 import generators from 'ngraph.generators';
+import fromDot from 'ngraph.fromdot';
 import {
   createScene,
   NodeCollection,
@@ -350,6 +351,82 @@ document.getElementById('btnAddNodes').addEventListener('click', async () => {
 
   await syncGraphToVisuals();
   updateStats();
+});
+
+// --- Drag & drop .dot files ---
+
+function loadGraphFromDot(dotString, fileName) {
+  // Register catalog entry so updatePositions can resolve it
+  graphCatalog.dotFile = {
+    name: fileName,
+    create() { return fromDot(dotString); },
+    nodeData(node) {
+      const d = node.data || {};
+      return {
+        label: d.label || String(node.id),
+        color: d.color || palette[hashCode(String(node.id)) % palette.length],
+        description: d.description || ''
+      };
+    }
+  };
+
+  // Update the dropdown to show the file name
+  const select = document.getElementById('graphType');
+  let dotOption = select.querySelector('option[value="dotFile"]');
+  if (!dotOption) {
+    dotOption = document.createElement('option');
+    dotOption.value = 'dotFile';
+    select.prepend(dotOption);
+  }
+  dotOption.textContent = fileName || 'Dropped .dot file';
+  select.value = 'dotFile';
+
+  // Load through the normal path
+  loadGraph('dotFile');
+}
+
+function hashCode(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+// Prevent default drag behavior on the whole page
+document.addEventListener('dragover', (e) => { e.preventDefault(); });
+document.addEventListener('dragenter', (e) => { e.preventDefault(); });
+
+// Drop zone: use the whole container
+container.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  container.style.outline = '2px dashed rgba(109, 213, 237, 0.6)';
+  container.style.outlineOffset = '-10px';
+});
+
+container.addEventListener('dragleave', () => {
+  container.style.outline = '';
+  container.style.outlineOffset = '';
+});
+
+container.addEventListener('drop', (e) => {
+  e.preventDefault();
+  container.style.outline = '';
+  container.style.outlineOffset = '';
+
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      loadGraphFromDot(reader.result, file.name);
+    } catch (err) {
+      console.error('Failed to parse .dot file:', err);
+      alert('Could not parse the file as a .dot graph.\n\n' + err.message);
+    }
+  };
+  reader.readAsText(file);
 });
 
 // Graph type selector
